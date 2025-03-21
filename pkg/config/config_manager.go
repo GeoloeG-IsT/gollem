@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/user/gollem/pkg/core"
+	"github.com/GeoloeG-IsT/gollem/pkg/core"
 )
 
 // ConfigManager manages configuration for the gollem package

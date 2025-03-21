@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/user/gollem/pkg/core"
-	"github.com/user/gollem/pkg/rag"
+	"github.com/GeoloeG-IsT/gollem/pkg/core"
+	"github.com/GeoloeG-IsT/gollem/pkg/rag"
 )
 
 // TestDocumentLoader tests the document loader functionality

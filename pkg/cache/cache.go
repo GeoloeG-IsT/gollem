@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/user/gollem/pkg/core"
+	"github.com/GeoloeG-IsT/gollem/pkg/core"
 )
 
 // Cache defines the interface for caching LLM responses

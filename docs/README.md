@@ -1,10 +1,10 @@
-# Gollem - Go Language Learning Model Interface
+# Gollem - Go Large Language Model Interface
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/user/gollem.svg)](https://pkg.go.dev/github.com/user/gollem)
-[![Go Report Card](https://goreportcard.com/badge/github.com/user/gollem)](https://goreportcard.com/report/github.com/user/gollem)
-[![License](https://img.shields.io/github/license/user/gollem)](https://github.com/user/gollem/blob/main/LICENSE)
+[![Go Reference](https://pkg.go.dev/badge/github.com/GeoloeG-IsT/gollem.svg)](https://pkg.go.dev/github.com/GeoloeG-IsT/gollem)
+[![Go Report Card](https://goreportcard.com/badge/github.com/GeoloeG-IsT/gollem)](https://goreportcard.com/report/github.com/GeoloeG-IsT/gollem)
+[![License](https://img.shields.io/github/license/GeoloeG-IsT/gollem)](https://github.com/GeoloeG-IsT/gollem/blob/main/LICENSE)
 
-Gollem is a comprehensive Go package that provides a high-level interface for interacting with Language Learning Models (LLMs). It supports multiple LLM providers, offers advanced features like prompt optimization and caching, and includes components for building RAG (Retrieval Augmented Generation) applications.
+Gollem is a comprehensive Go package that provides a high-level interface for interacting with Large Language Models (LLMs). It supports multiple LLM providers, offers advanced features like prompt optimization and caching, and includes components for building RAG (Retrieval Augmented Generation) applications.
 
 ## Features
 
@@ -22,7 +22,7 @@ Gollem is a comprehensive Go package that provides a high-level interface for in
 ## Installation
 
 ```bash
-go get github.com/user/gollem
+go get github.com/GeoloeG-IsT/gollem
 ```
 
 ## Quick Start
@@ -35,8 +35,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/user/gollem/pkg/config"
-	"github.com/user/gollem/pkg/core"
+	"github.com/GeoloeG-IsT/gollem/pkg/config"
+	"github.com/GeoloeG-IsT/gollem/pkg/core"
 )
 
 func main() {

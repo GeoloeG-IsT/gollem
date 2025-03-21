@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/user/gollem/pkg/cache"
-	"github.com/user/gollem/pkg/core"
+	"github.com/GeoloeG-IsT/gollem/pkg/cache"
+	"github.com/GeoloeG-IsT/gollem/pkg/core"
 )
 
 // TestMemoryCache tests the memory cache implementation

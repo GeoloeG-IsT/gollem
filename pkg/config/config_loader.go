@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/user/gollem/pkg/core"
-	"github.com/user/gollem/pkg/providers/custom"
+	"github.com/GeoloeG-IsT/gollem/pkg/core"
+	"github.com/GeoloeG-IsT/gollem/pkg/providers/custom"
 )
 
 // EnvVarPrefix is the prefix for environment variables

@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/user/gollem/pkg/core"
+	"github.com/GeoloeG-IsT/gollem/pkg/core"
 )
 
 // PersistentCache is a file-based implementation of Cache

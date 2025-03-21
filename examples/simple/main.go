@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/user/gollem/pkg/core"
-	"github.com/user/gollem/pkg/providers/openai"
+	"github.com/GeoloeG-IsT/gollem/pkg/core"
+	"github.com/GeoloeG-IsT/gollem/pkg/providers/openai"
 )
 
 func main() {

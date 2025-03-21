@@ -54,7 +54,7 @@ The OpenAI provider supports OpenAI's GPT models.
 
 ```go
 import (
-    "github.com/user/gollem/pkg/providers/openai"
+    "github.com/GeoloeG-IsT/gollem/pkg/providers/openai"
 )
 
 provider, err := openai.NewProvider(openai.Config{
@@ -100,7 +100,7 @@ The Anthropic provider supports Anthropic's Claude models.
 
 ```go
 import (
-    "github.com/user/gollem/pkg/providers/anthropic"
+    "github.com/GeoloeG-IsT/gollem/pkg/providers/anthropic"
 )
 
 provider, err := anthropic.NewProvider(anthropic.Config{
@@ -148,7 +148,7 @@ The Google provider supports Google's Gemini models.
 
 ```go
 import (
-    "github.com/user/gollem/pkg/providers/google"
+    "github.com/GeoloeG-IsT/gollem/pkg/providers/google"
 )
 
 provider, err := google.NewProvider(google.Config{
@@ -188,7 +188,7 @@ The Llama provider supports running Llama models locally or via API.
 
 ```go
 import (
-    "github.com/user/gollem/pkg/providers/llama"
+    "github.com/GeoloeG-IsT/gollem/pkg/providers/llama"
 )
 
 // For local models
@@ -241,7 +241,7 @@ The Mistral provider supports Mistral AI's models.
 
 ```go
 import (
-    "github.com/user/gollem/pkg/providers/mistral"
+    "github.com/GeoloeG-IsT/gollem/pkg/providers/mistral"
 )
 
 provider, err := mistral.NewProvider(mistral.Config{
@@ -263,7 +263,7 @@ package myprovider
 
 import (
     "context"
-    "github.com/user/gollem/pkg/core"
+    "github.com/GeoloeG-IsT/gollem/pkg/core"
 )
 
 type MyProvider struct {
@@ -338,7 +338,7 @@ Gollem supports middleware for providers, which can be used to add functionality
 
 ```go
 import (
-    "github.com/user/gollem/pkg/cache"
+    "github.com/GeoloeG-IsT/gollem/pkg/cache"
 )
 
 // Create a cache
@@ -358,7 +358,7 @@ cachedProvider := cache.NewCacheMiddleware(provider, memCache)
 
 ```go
 import (
-    "github.com/user/gollem/pkg/tracing"
+    "github.com/GeoloeG-IsT/gollem/pkg/tracing"
 )
 
 // Create a tracer

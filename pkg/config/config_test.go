@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/user/gollem/pkg/config"
+	"github.com/GeoloeG-IsT/gollem/pkg/config"
 )
 
 // TestConfigLoading tests the configuration loading functionality

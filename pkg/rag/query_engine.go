@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/user/gollem/pkg/core"
+	"github.com/GeoloeG-IsT/gollem/pkg/core"
 )
 
 // Embeddings implements the EmbeddingProvider interface for various embedding models

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"plugin"
 
-	"github.com/user/gollem/pkg/core"
+	"github.com/GeoloeG-IsT/gollem/pkg/core"
 )
 
 // ProviderLoader loads custom LLM providers from Go plugins
@@ -108,7 +108,7 @@ import (
 	"context"
 	"errors"
 	
-	"github.com/user/gollem/pkg/core"
+	"github.com/GeoloeG-IsT/gollem/pkg/core"
 )
 
 // ProviderName is the name of the provider

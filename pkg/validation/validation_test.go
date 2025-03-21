@@ -3,7 +3,7 @@ package validation_test
 import (
 	"testing"
 
-	"github.com/user/gollem/pkg/validation"
+	"github.com/GeoloeG-IsT/gollem/pkg/validation"
 )
 
 // TestJSONSchemaValidation tests the JSON schema validation

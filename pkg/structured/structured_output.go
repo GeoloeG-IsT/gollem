@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/user/gollem/pkg/core"
-	"github.com/user/gollem/pkg/validation"
+	"github.com/GeoloeG-IsT/gollem/pkg/core"
+	"github.com/GeoloeG-IsT/gollem/pkg/validation"
 )
 
 // OutputParser parses structured output from LLM responses

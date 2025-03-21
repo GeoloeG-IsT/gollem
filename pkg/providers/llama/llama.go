@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/user/gollem/pkg/core"
+	"github.com/GeoloeG-IsT/gollem/pkg/core"
 )
 
 // Provider implements the core.LLMProvider interface for Llama models

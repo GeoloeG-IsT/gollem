@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/user/gollem/pkg/core"
-	"github.com/user/gollem/pkg/tracing"
+	"github.com/GeoloeG-IsT/gollem/pkg/core"
+	"github.com/GeoloeG-IsT/gollem/pkg/tracing"
 )
 
 // TestConsoleTracer tests the console tracer

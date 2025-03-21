@@ -6,7 +6,7 @@ import (
 	"io"
 	"sync"
 
-	"github.com/user/gollem/pkg/core"
+	"github.com/GeoloeG-IsT/gollem/pkg/core"
 )
 
 // StreamHandler defines the interface for handling streaming responses

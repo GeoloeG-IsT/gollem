@@ -3,8 +3,8 @@ package optimization_test
 import (
 	"testing"
 
-	"github.com/user/gollem/pkg/core"
-	"github.com/user/gollem/pkg/optimization"
+	"github.com/GeoloeG-IsT/gollem/pkg/core"
+	"github.com/GeoloeG-IsT/gollem/pkg/optimization"
 )
 
 // TestTemplateStrategy tests the template strategy for prompt optimization

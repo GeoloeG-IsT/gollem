@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/user/gollem/pkg/core"
+	"github.com/GeoloeG-IsT/gollem/pkg/core"
 )
 
 // Span represents a trace span

@@ -3,7 +3,7 @@ package optimization
 import (
 	"strings"
 
-	"github.com/user/gollem/pkg/core"
+	"github.com/GeoloeG-IsT/gollem/pkg/core"
 )
 
 // PromptOptimizer optimizes prompts for better results and efficiency
