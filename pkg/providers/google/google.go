@@ -117,6 +117,11 @@ func (p *Provider) Generate(ctx context.Context, prompt *core.Prompt) (*core.Res
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 	
+	// Check if candidates array is empty
+	if len(googleResp.Candidates) == 0 {
+		return nil, fmt.Errorf("no candidates returned in response")
+	}
+	
 	// Convert to core.Response
 	response := &core.Response{
 		Text: googleResp.Candidates[0].Content.Parts[0].Text,
@@ -274,6 +279,11 @@ func (s *googleStream) Next() (*core.ResponseChunk, error) {
 	var streamResp generateContentResponse
 	if err := json.Unmarshal(line, &streamResp); err != nil {
 		return nil, fmt.Errorf("failed to parse stream response: %w", err)
+	}
+	
+	// Check if candidates array is empty
+	if len(streamResp.Candidates) == 0 {
+		return nil, fmt.Errorf("no candidates returned in stream response")
 	}
 	
 	// Create a response chunk

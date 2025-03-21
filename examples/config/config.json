@@ -1,5 +1,5 @@
 {
-  "default_provider": "anthropic",
+  "default_provider": "google",
   "providers": {
     "openai": {
       "type": "openai",
@@ -20,7 +20,7 @@
     "google": {
       "type": "google",
       "api_key": "",
-      "model": "gemini-pro"
+      "model": "gemini-2.0-flash"
     },
     "llama": {
       "type": "llama",
