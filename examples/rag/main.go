@@ -10,9 +10,23 @@ import (
 	"github.com/GeoloeG-IsT/gollem/pkg/core"
 	"github.com/GeoloeG-IsT/gollem/pkg/providers/openai"
 	"github.com/GeoloeG-IsT/gollem/pkg/rag"
+	"github.com/joho/godotenv"
 )
 
 func main() {
+	// Load .env file
+	err := godotenv.Load()
+	if err != nil {
+		log.Println("Warning: Error loading .env file:", err)
+	}
+
+	// Get API key from environment variable
+	apiKey := os.Getenv("OPENAI_API_KEY")
+	if apiKey == "" {
+		log.Println("Warning: OPENAI_API_KEY not found in environment, using dummy key")
+		apiKey = "dummy_openai_api_key_12345"
+	}
+
 	// Create a temporary directory for test files
 	tempDir, err := os.MkdirTemp("", "gollem-rag-example")
 	if err != nil {
@@ -25,7 +39,7 @@ func main() {
 
 	// Create an LLM provider
 	provider, err := openai.NewProvider(openai.Config{
-		APIKey: "your-api-key", // Replace with your actual API key
+		APIKey: apiKey,
 		Model:  "gpt-4",
 	})
 	if err != nil {
