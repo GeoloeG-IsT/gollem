@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/GeoloeG-IsT/gollem/pkg/core"
@@ -70,10 +72,10 @@ type QueryEngine struct {
 type QueryOptions struct {
 	// NumDocuments is the number of documents to retrieve
 	NumDocuments int
-	
+
 	// IncludeMetadata indicates whether to include document metadata in the prompt
 	IncludeMetadata bool
-	
+
 	// PromptTemplate is the template for the prompt
 	PromptTemplate string
 }
@@ -84,13 +86,13 @@ func NewQueryEngine(rag *RAG, options QueryOptions) *QueryEngine {
 	if options.NumDocuments == 0 {
 		options.NumDocuments = 3
 	}
-	
+
 	if options.PromptTemplate == "" {
 		options.PromptTemplate = "Answer the question based on the following context:\n\n{{context}}\n\nQuestion: {{query}}"
 	}
-	
+
 	return &QueryEngine{
-		rag: rag,
+		rag:     rag,
 		options: options,
 	}
 }
@@ -102,18 +104,18 @@ func (e *QueryEngine) Query(ctx context.Context, query string) (*core.Response, 
 	if err != nil {
 		return nil, fmt.Errorf("failed to embed query: %w", err)
 	}
-	
+
 	// Search for similar documents
 	docs, err := e.rag.VectorStore.SimilaritySearch(ctx, embedding, e.options.NumDocuments)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search for similar documents: %w", err)
 	}
-	
+
 	// Create a prompt with the retrieved documents
 	var contextBuilder strings.Builder
 	for i, doc := range docs {
 		contextBuilder.WriteString(fmt.Sprintf("Context %d:\n%s\n\n", i+1, doc.Content))
-		
+
 		// Include metadata if requested
 		if e.options.IncludeMetadata && len(doc.Metadata) > 0 {
 			contextBuilder.WriteString("Metadata:\n")
@@ -123,16 +125,28 @@ func (e *QueryEngine) Query(ctx context.Context, query string) (*core.Response, 
 			contextBuilder.WriteString("\n")
 		}
 	}
-	
+
 	// Replace template variables
 	promptText := e.options.PromptTemplate
 	promptText = strings.ReplaceAll(promptText, "{{context}}", contextBuilder.String())
 	promptText = strings.ReplaceAll(promptText, "{{query}}", query)
-	
+
 	prompt := core.NewPrompt(promptText)
-	
+
 	// Generate a response using the LLM provider
-	llmProvider := e.rag.Embeddings.(*Embeddings).Provider
+	// Check if the embeddings provider is of type *Embeddings
+	if embeddings, ok := e.rag.Embeddings.(*Embeddings); ok {
+		// If it is, use its Provider field
+		return embeddings.Provider.Generate(ctx, prompt)
+	}
+
+	// If we're in a test environment with a mock provider, we need to handle it differently
+	// For tests, we'll use a mock provider that's passed in the context
+	llmProvider, ok := ctx.Value("llm_provider").(core.LLMProvider)
+	if !ok {
+		return nil, fmt.Errorf("no LLM provider available: embeddings provider is not *Embeddings and no provider in context")
+	}
+
 	return llmProvider.Generate(ctx, prompt)
 }
 
@@ -213,9 +227,9 @@ func (s *CharacterTextSplitter) SplitDocument(doc *Document) []*Document {
 		}
 
 		chunks = append(chunks, &Document{
-			ID:         fmt.Sprintf("%s-%d", doc.ID, i),
-			Content:    content[i:end],
-			Metadata:   doc.Metadata,
+			ID:       fmt.Sprintf("%s-%d", doc.ID, i),
+			Content:  content[i:end],
+			Metadata: doc.Metadata,
 		})
 
 		if end == len(content) {
@@ -230,7 +244,7 @@ func (s *CharacterTextSplitter) SplitDocument(doc *Document) []*Document {
 type DocumentLoader interface {
 	// LoadDocument loads a document from a file
 	LoadDocument(ctx context.Context, path string) (*Document, error)
-	
+
 	// LoadDocuments loads documents from a directory
 	LoadDocuments(ctx context.Context, path string) ([]*Document, error)
 }
@@ -249,12 +263,18 @@ func NewFileLoader(basePath string) *FileLoader {
 
 // LoadDocument loads a document from a file
 func (l *FileLoader) LoadDocument(ctx context.Context, path string) (*Document, error) {
-	// In a real implementation, this would load the document from a file
+	fullPath := filepath.Join(l.basePath, path)
+	content, err := os.ReadFile(fullPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file: %w", err)
+	}
+
 	return &Document{
 		ID:      path,
-		Content: "Sample content",
+		Content: string(content),
 		Metadata: map[string]interface{}{
-			"path": path,
+			"path": fullPath,
+			"type": "file",
 		},
 	}, nil
 }
@@ -303,10 +323,10 @@ func (p *RAGPipeline) ProcessFile(ctx context.Context, path string) error {
 	if err != nil {
 		return fmt.Errorf("failed to load document: %w", err)
 	}
-	
+
 	// Split the document
 	splitDocs := p.splitter.SplitDocument(doc)
-	
+
 	// Add the documents to the vector store
 	return p.vectorStore.AddChunks(ctx, splitDocsToChunks(splitDocs))
 }
@@ -318,13 +338,13 @@ func (p *RAGPipeline) ProcessDirectory(ctx context.Context, path string) error {
 	if err != nil {
 		return fmt.Errorf("failed to load documents: %w", err)
 	}
-	
+
 	// Split the documents
 	var splitDocs []*Document
 	for _, doc := range docs {
 		splitDocs = append(splitDocs, p.splitter.SplitDocument(doc)...)
 	}
-	
+
 	// Add the documents to the vector store
 	return p.vectorStore.AddChunks(ctx, splitDocsToChunks(splitDocs))
 }
@@ -354,31 +374,31 @@ type RAGSystem struct {
 func NewRAGSystem(provider core.LLMProvider, embeddingProvider EmbeddingsProvider) *RAGSystem {
 	// Create the vector store
 	vectorStore := NewMemoryVectorStore(embeddingProvider)
-	
+
 	// Create the text splitter
 	splitter := NewCharacterTextSplitter()
-	
+
 	// Create the document loader
 	loader := NewFileLoader(".")
-	
+
 	// Create the pipeline
 	pipeline := NewRAGPipeline(loader, splitter, vectorStore)
-	
+
 	// Create the RAG
 	rag := &RAG{
-		VectorStore: vectorStore,
-		Embeddings:  embeddingProvider,
-		ChunkSize:   1000,
+		VectorStore:  vectorStore,
+		Embeddings:   embeddingProvider,
+		ChunkSize:    1000,
 		ChunkOverlap: 200,
-		TopK:        3,
+		TopK:         3,
 	}
-	
+
 	// Create the query engine
 	queryEngine := NewQueryEngine(rag, QueryOptions{})
-	
+
 	// Create the document store
 	documentStore := NewDocumentStore()
-	
+
 	return &RAGSystem{
 		pipeline:      pipeline,
 		queryEngine:   queryEngine,
