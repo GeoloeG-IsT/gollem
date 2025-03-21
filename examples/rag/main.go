@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/GeoloeG-IsT/gollem/pkg/core"
 	"github.com/GeoloeG-IsT/gollem/pkg/providers/openai"
 	"github.com/GeoloeG-IsT/gollem/pkg/rag"
 	"github.com/joho/godotenv"

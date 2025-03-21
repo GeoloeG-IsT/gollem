@@ -55,7 +55,7 @@ func main() {
 	ctx := context.Background()
 
 	// Start a custom span
-	ctx, span := consoleTracer.StartSpan(ctx, "example_operation")
+	ctx, _ = consoleTracer.StartSpan(ctx, "example_operation")
 
 	// Add attributes to the span
 	consoleTracer.SetAttribute(ctx, "example_attribute", "example_value")
@@ -69,7 +69,7 @@ func main() {
 	fmt.Println("Generating response...")
 	response, err := tracedProvider.Generate(ctx, prompt)
 	if err != nil {
-		consoleTracer.EndSpan(ctx, tracing.SpanStatusError, err)
+		consoleTracer.EndSpan(ctx, tracing.SpanStatusError)
 		log.Fatalf("Failed to generate response: %v", err)
 	}
 
@@ -78,7 +78,7 @@ func main() {
 	fmt.Println("Tokens used:", response.TokensUsed.Total)
 
 	// End the custom span
-	consoleTracer.EndSpan(ctx, tracing.SpanStatusOK, nil)
+	consoleTracer.EndSpan(ctx, tracing.SpanStatusOK)
 
 	// Generate a streaming response
 	fmt.Println("\nGenerating streaming response...")
@@ -109,8 +109,8 @@ func main() {
 	stream.Close()
 
 	// Flush the tracers
-	consoleTracer.Flush(ctx)
-	fileTracer.Flush(ctx)
+	consoleTracer.Flush()
+	fileTracer.Flush()
 
 	fmt.Println("\nTracing information has been logged to the console and trace.log file.")
 }
