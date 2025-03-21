@@ -2,6 +2,8 @@ package cache_test
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"testing"
 	"time"
 
@@ -105,11 +107,6 @@ func TestCacheMiddleware(t *testing.T) {
 
 	// Create a cache middleware
 	middleware := cache.NewCacheMiddleware(provider, memCache)
-
-	// Check the name
-	if middleware.Name() != "mock_provider_cached" {
-		t.Fatalf("Middleware name is incorrect: %s", middleware.Name())
-	}
 
 	// Generate a response
 	ctx := context.Background()

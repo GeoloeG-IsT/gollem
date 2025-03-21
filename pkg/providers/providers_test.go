@@ -2,6 +2,7 @@ package providers_test
 
 import (
 	"context"
+	"io"
 	"testing"
 
 	"github.com/GeoloeG-IsT/gollem/pkg/core"

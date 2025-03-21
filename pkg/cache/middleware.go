@@ -20,6 +20,11 @@ func NewCacheMiddleware(provider core.LLMProvider, cache Cache) *CacheMiddleware
 	}
 }
 
+// Name returns the name of the middleware
+func (m *CacheMiddleware) Name() string {
+	return m.provider.Name() + "_cached"
+}
+
 // Generate generates a response for a prompt, using the cache if available
 func (m *CacheMiddleware) Generate(ctx context.Context, prompt *core.Prompt) (*core.Response, error) {
 	// Check if the response is in the cache
