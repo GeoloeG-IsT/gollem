@@ -72,7 +72,6 @@ func (p *StreamProcessor) Process(ctx context.Context, stream core.ResponseStrea
 				finalResponse = &core.Response{
 					Text:         p.buffer,
 					FinishReason: chunk.FinishReason,
-					Metadata:     chunk.Metadata,
 				}
 			}
 		}

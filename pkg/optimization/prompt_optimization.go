@@ -1,6 +1,7 @@
 package optimization
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/GeoloeG-IsT/gollem/pkg/core"

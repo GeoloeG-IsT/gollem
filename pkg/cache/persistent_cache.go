@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -47,7 +48,8 @@ func NewPersistentCache(options ...PersistentCacheOption) (*PersistentCache, err
 	}
 	
 	// Load the metadata
-	if err := cache.loadMetadata(); err != nil {
+	_, err := cache.loadMetadata()
+	if err != nil {
 		// If the metadata file doesn't exist, create it
 		if !os.IsNotExist(err) {
 			return nil, fmt.Errorf("failed to load metadata: %w", err)
@@ -339,53 +341,8 @@ func (c *PersistentCache) purgeOldEntries(metadata *cacheMetadata) {
 		}
 	}
 	
-	// Update the last purged timestamp
+	// Update the last purged time
 	metadata.LastPurged = now
 }
 
-// CacheMiddleware is middleware that adds caching to an LLM provider
-type CacheMiddleware struct {
-	provider core.LLMProvider
-	cache    Cache
-}
-
-// NewCacheMiddleware creates a new cache middleware
-func NewCacheMiddleware(provider core.LLMProvider, cache Cache) *CacheMiddleware {
-	return &CacheMiddleware{
-		provider: provider,
-		cache:    cache,
-	}
-}
-
-// Name returns the name of the provider
-func (m *CacheMiddleware) Name() string {
-	return m.provider.Name() + "_cached"
-}
-
-// Generate generates a response for the given prompt
-func (m *CacheMiddleware) Generate(ctx context.Context, prompt *core.Prompt) (*core.Response, error) {
-	// Check if the response is cached
-	if response, found := m.cache.Get(ctx, prompt); found {
-		return response, nil
-	}
-	
-	// Generate a response
-	response, err := m.provider.Generate(ctx, prompt)
-	if err != nil {
-		return nil, err
-	}
-	
-	// Cache the response
-	if err := m.cache.Set(ctx, prompt, response); err != nil {
-		// Log the error but don't fail the request
-		fmt.Printf("Failed to cache response: %v\n", err)
-	}
-	
-	return response, nil
-}
-
-// GenerateStream generates a streaming response for the given prompt
-func (m *CacheMiddleware) GenerateStream(ctx context.Context, prompt *core.Prompt) (core.ResponseStream, error) {
-	// Streaming responses are not cached
-	return m.provider.GenerateStream(ctx, prompt)
-}
+// Use the defaultHashFunc from cache.go instead of redefining it here

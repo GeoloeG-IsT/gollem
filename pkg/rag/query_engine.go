@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"sort"
 	"strings"
 
 	"github.com/GeoloeG-IsT/gollem/pkg/core"
@@ -12,16 +11,16 @@ import (
 
 // Embeddings implements the EmbeddingProvider interface for various embedding models
 type Embeddings struct {
-	provider core.LLMProvider
-	model    string
+	Provider  core.LLMProvider
+	model     string
 	dimension int
 }
 
 // NewEmbeddings creates a new embeddings provider
 func NewEmbeddings(provider core.LLMProvider, model string, dimension int) *Embeddings {
 	return &Embeddings{
-		provider: provider,
-		model:    model,
+		Provider:  provider,
+		model:     model,
 		dimension: dimension,
 	}
 }
@@ -44,6 +43,13 @@ func (e *Embeddings) EmbedDocuments(ctx context.Context, texts []string) ([][]fl
 	return embeddings, nil
 }
 
+// EmbedDocument generates an embedding for a document
+func (e *Embeddings) EmbedDocument(ctx context.Context, text string) ([]float32, error) {
+	// In a real implementation, this would call the provider's API to generate an embedding
+	// For simplicity, we're just returning a random embedding
+	return e.generateRandomEmbedding(), nil
+}
+
 // generateRandomEmbedding generates a random embedding for testing
 func (e *Embeddings) generateRandomEmbedding() []float32 {
 	// Create a deterministic embedding based on the text
@@ -56,7 +62,7 @@ func (e *Embeddings) generateRandomEmbedding() []float32 {
 
 // QueryEngine performs RAG queries with different strategies
 type QueryEngine struct {
-	rag *RAG
+	rag     *RAG
 	options QueryOptions
 }
 
@@ -91,8 +97,14 @@ func NewQueryEngine(rag *RAG, options QueryOptions) *QueryEngine {
 
 // Query performs a RAG query
 func (e *QueryEngine) Query(ctx context.Context, query string) (*core.Response, error) {
+	// Generate embedding for the query
+	embedding, err := e.rag.Embeddings.EmbedQuery(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to embed query: %w", err)
+	}
+	
 	// Search for similar documents
-	docs, err := e.rag.vectorStore.SimilaritySearch(ctx, query, e.options.NumDocuments)
+	docs, err := e.rag.VectorStore.SimilaritySearch(ctx, embedding, e.options.NumDocuments)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search for similar documents: %w", err)
 	}
@@ -119,8 +131,9 @@ func (e *QueryEngine) Query(ctx context.Context, query string) (*core.Response, 
 	
 	prompt := core.NewPrompt(promptText)
 	
-	// Generate a response
-	return e.rag.llmProvider.Generate(ctx, prompt)
+	// Generate a response using the LLM provider
+	llmProvider := e.rag.Embeddings.(*Embeddings).Provider
+	return llmProvider.Generate(ctx, prompt)
 }
 
 // DocumentStore manages documents in the RAG system
@@ -160,6 +173,113 @@ func (s *DocumentStore) GetDocuments() []*Document {
 	return docs
 }
 
+// TextSplitter splits text into chunks
+type TextSplitter interface {
+	// SplitDocument splits a document into chunks
+	SplitDocument(doc *Document) []*Document
+}
+
+// CharacterTextSplitter splits text by character count
+type CharacterTextSplitter struct {
+	ChunkSize    int
+	ChunkOverlap int
+}
+
+// NewCharacterTextSplitter creates a new character text splitter
+func NewCharacterTextSplitter() *CharacterTextSplitter {
+	return &CharacterTextSplitter{
+		ChunkSize:    1000,
+		ChunkOverlap: 200,
+	}
+}
+
+// SplitDocument splits a document into chunks
+func (s *CharacterTextSplitter) SplitDocument(doc *Document) []*Document {
+	content := doc.Content
+	chunkSize := s.ChunkSize
+	chunkOverlap := s.ChunkOverlap
+
+	// If the content is smaller than the chunk size, return a single chunk
+	if len(content) <= chunkSize {
+		return []*Document{doc}
+	}
+
+	// Split the content into chunks
+	var chunks []*Document
+	for i := 0; i < len(content); i += chunkSize - chunkOverlap {
+		end := i + chunkSize
+		if end > len(content) {
+			end = len(content)
+		}
+
+		chunks = append(chunks, &Document{
+			ID:         fmt.Sprintf("%s-%d", doc.ID, i),
+			Content:    content[i:end],
+			Metadata:   doc.Metadata,
+		})
+
+		if end == len(content) {
+			break
+		}
+	}
+
+	return chunks
+}
+
+// DocumentLoader loads documents from files
+type DocumentLoader interface {
+	// LoadDocument loads a document from a file
+	LoadDocument(ctx context.Context, path string) (*Document, error)
+	
+	// LoadDocuments loads documents from a directory
+	LoadDocuments(ctx context.Context, path string) ([]*Document, error)
+}
+
+// FileLoader loads documents from files
+type FileLoader struct {
+	basePath string
+}
+
+// NewFileLoader creates a new file loader
+func NewFileLoader(basePath string) *FileLoader {
+	return &FileLoader{
+		basePath: basePath,
+	}
+}
+
+// LoadDocument loads a document from a file
+func (l *FileLoader) LoadDocument(ctx context.Context, path string) (*Document, error) {
+	// In a real implementation, this would load the document from a file
+	return &Document{
+		ID:      path,
+		Content: "Sample content",
+		Metadata: map[string]interface{}{
+			"path": path,
+		},
+	}, nil
+}
+
+// LoadDocuments loads documents from a directory
+func (l *FileLoader) LoadDocuments(ctx context.Context, path string) ([]*Document, error) {
+	// In a real implementation, this would load documents from a directory
+	return []*Document{
+		{
+			ID:      "doc1",
+			Content: "Sample content 1",
+			Metadata: map[string]interface{}{
+				"path": path + "/doc1",
+			},
+		},
+		{
+			ID:      "doc2",
+			Content: "Sample content 2",
+			Metadata: map[string]interface{}{
+				"path": path + "/doc2",
+			},
+		},
+	}, nil
+}
+
 // RAGPipeline combines document loading, splitting, and indexing
 type RAGPipeline struct {
 	loader      DocumentLoader
@@ -188,7 +308,7 @@ func (p *RAGPipeline) ProcessFile(ctx context.Context, path string) error {
 	splitDocs := p.splitter.SplitDocument(doc)
 	
 	// Add the documents to the vector store
-	return p.vectorStore.AddDocuments(ctx, splitDocs)
+	return p.vectorStore.AddChunks(ctx, splitDocsToChunks(splitDocs))
 }
 
 // ProcessDirectory processes a directory and adds all files to the vector store
@@ -206,18 +326,32 @@ func (p *RAGPipeline) ProcessDirectory(ctx context.Context, path string) error {
 	}
 	
 	// Add the documents to the vector store
-	return p.vectorStore.AddDocuments(ctx, splitDocs)
+	return p.vectorStore.AddChunks(ctx, splitDocsToChunks(splitDocs))
+}
+
+// splitDocsToChunks converts Document slices to Chunk slices
+func splitDocsToChunks(docs []*Document) []*Chunk {
+	chunks := make([]*Chunk, len(docs))
+	for i, doc := range docs {
+		chunks[i] = &Chunk{
+			ID:         doc.ID,
+			DocumentID: doc.ID,
+			Content:    doc.Content,
+			Metadata:   doc.Metadata,
+		}
+	}
+	return chunks
 }
 
 // RAGSystem combines all RAG components into a complete system
 type RAGSystem struct {
-	pipeline    *RAGPipeline
-	queryEngine *QueryEngine
+	pipeline      *RAGPipeline
+	queryEngine   *QueryEngine
 	documentStore *DocumentStore
 }
 
 // NewRAGSystem creates a new RAG system
-func NewRAGSystem(provider core.LLMProvider, embeddingProvider EmbeddingProvider) *RAGSystem {
+func NewRAGSystem(provider core.LLMProvider, embeddingProvider EmbeddingsProvider) *RAGSystem {
 	// Create the vector store
 	vectorStore := NewMemoryVectorStore(embeddingProvider)
 	
@@ -231,7 +365,13 @@ func NewRAGSystem(provider core.LLMProvider, embeddingProvider EmbeddingProvider
 	pipeline := NewRAGPipeline(loader, splitter, vectorStore)
 	
 	// Create the RAG
-	rag := NewRAG(vectorStore, provider, splitter)
+	rag := &RAG{
+		VectorStore: vectorStore,
+		Embeddings:  embeddingProvider,
+		ChunkSize:   1000,
+		ChunkOverlap: 200,
+		TopK:        3,
+	}
 	
 	// Create the query engine
 	queryEngine := NewQueryEngine(rag, QueryOptions{})
@@ -240,8 +380,8 @@ func NewRAGSystem(provider core.LLMProvider, embeddingProvider EmbeddingProvider
 	documentStore := NewDocumentStore()
 	
 	return &RAGSystem{
-		pipeline:    pipeline,
-		queryEngine: queryEngine,
+		pipeline:      pipeline,
+		queryEngine:   queryEngine,
 		documentStore: documentStore,
 	}
 }

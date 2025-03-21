@@ -9,8 +9,6 @@ import (
 	"net/http"
 	"sync"
 	"time"
-
-	"github.com/GeoloeG-IsT/gollem/pkg/core"
 )
 
 // RemoteTracer is a tracer that sends traces to a remote endpoint
@@ -302,7 +300,7 @@ func (t *PhoenixTracer) EndSpan(ctx context.Context, status SpanStatus, err erro
 		Name:       span.Name,
 		StartTime:  span.StartTime.UnixNano() / 1000000, // Convert to milliseconds
 		EndTime:    span.EndTime.UnixNano() / 1000000,   // Convert to milliseconds
-		Status:     string(span.Status),
+		Status:     string(status),
 		Attributes: span.Attributes,
 		ProjectID:  t.projectID,
 	}
@@ -370,7 +368,7 @@ func (t *PhoenixTracer) Flush(ctx context.Context) error {
 	return t.flushInternal(ctx)
 }
 
-// flushInternal flushes the buffer to the Phoenix endpoint
+// flushInternal flushes the buffer to the remote endpoint
 func (t *PhoenixTracer) flushInternal(ctx context.Context) error {
 	t.mu.Lock()
 	if len(t.buffer) == 0 {
@@ -421,61 +419,4 @@ func (t *PhoenixTracer) flushInternal(ctx context.Context) error {
 	}
 
 	return nil
-}
-
-// TracerFactory creates tracers based on configuration
-type TracerFactory struct{}
-
-// NewTracerFactory creates a new tracer factory
-func NewTracerFactory() *TracerFactory {
-	return &TracerFactory{}
-}
-
-// CreateTracer creates a tracer based on the configuration
-func (f *TracerFactory) CreateTracer(config map[string]interface{}) (Tracer, error) {
-	// Get the tracer type
-	tracerType, ok := config["type"].(string)
-	if !ok {
-		return nil, fmt.Errorf("tracer type not specified")
-	}
-
-	// Create the tracer based on the type
-	switch tracerType {
-	case "console":
-		return NewConsoleTracer(), nil
-	case "file":
-		path, ok := config["path"].(string)
-		if !ok {
-			return nil, fmt.Errorf("file path not specified")
-		}
-		return NewFileTracer(path)
-	case "remote":
-		endpoint, ok := config["endpoint"].(string)
-		if !ok {
-			return nil, fmt.Errorf("remote endpoint not specified")
-		}
-		apiKey, _ := config["api_key"].(string)
-		bufSize := 100
-		if size, ok := config["buffer_size"].(float64); ok {
-			bufSize = int(size)
-		}
-		return NewRemoteTracer(endpoint, apiKey, bufSize), nil
-	case "phoenix":
-		endpoint, ok := config["endpoint"].(string)
-		if !ok {
-			return nil, fmt.Errorf("phoenix endpoint not specified")
-		}
-		apiKey, _ := config["api_key"].(string)
-		projectID, ok := config["project_id"].(string)
-		if !ok {
-			return nil, fmt.Errorf("phoenix project ID not specified")
-		}
-		bufSize := 100
-		if size, ok := config["buffer_size"].(float64); ok {
-			bufSize = int(size)
-		}
-		return NewPhoenixTracer(endpoint, apiKey, projectID, bufSize), nil
-	default:
-		return nil, fmt.Errorf("unknown tracer type: %s", tracerType)
-	}
 }

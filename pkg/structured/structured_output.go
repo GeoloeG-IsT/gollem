@@ -1,6 +1,7 @@
 package structured
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"

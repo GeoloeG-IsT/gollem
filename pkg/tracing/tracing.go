@@ -4,11 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"sync"
 	"time"
-
-	"github.com/GeoloeG-IsT/gollem/pkg/core"
 )
 
 // Span represents a trace span
@@ -45,17 +44,17 @@ type Span struct {
 }
 
 // SpanStatus represents the status of a span
-type SpanStatus string
+type SpanStatus int
 
 const (
 	// SpanStatusOK indicates the span completed successfully
-	SpanStatusOK SpanStatus = "ok"
+	SpanStatusOK SpanStatus = iota
 
 	// SpanStatusError indicates the span completed with an error
-	SpanStatusError SpanStatus = "error"
+	SpanStatusError
 
 	// SpanStatusCanceled indicates the span was canceled
-	SpanStatusCanceled SpanStatus = "canceled"
+	SpanStatusCanceled
 )
 
 // SpanEvent represents an event that occurred during a span
@@ -76,25 +75,28 @@ type Tracer interface {
 	StartSpan(ctx context.Context, name string, opts ...SpanOption) (context.Context, *Span)
 
 	// EndSpan ends a span
-	EndSpan(ctx context.Context, status SpanStatus, err error)
+	EndSpan(ctx context.Context, status SpanStatus)
 
 	// AddEvent adds an event to the current span
-	AddEvent(ctx context.Context, name string, attrs map[string]interface{})
+	AddEvent(ctx context.Context, name string, attributes map[string]interface{})
 
 	// SetAttribute sets an attribute on the current span
 	SetAttribute(ctx context.Context, key string, value interface{})
 
 	// Flush flushes any pending spans
-	Flush(ctx context.Context) error
+	Flush() error
 }
 
 // SpanOption configures a span
 type SpanOption func(*Span)
 
 // WithAttributes sets attributes on a span
-func WithAttributes(attrs map[string]interface{}) SpanOption {
+func WithAttributes(attributes map[string]interface{}) SpanOption {
 	return func(s *Span) {
-		for k, v := range attrs {
+		if s.Attributes == nil {
+			s.Attributes = make(map[string]interface{})
+		}
+		for k, v := range attributes {
 			s.Attributes[k] = v
 		}
 	}
@@ -106,7 +108,6 @@ func WithParent(parent *Span) SpanOption {
 		if parent != nil {
 			s.ParentID = parent.ID
 			s.TraceID = parent.TraceID
-			parent.Children = append(parent.Children, s)
 		}
 	}
 }
@@ -114,14 +115,17 @@ func WithParent(parent *Span) SpanOption {
 // spanKey is the context key for spans
 type spanKey struct{}
 
-// ConsoleTracer is a tracer that logs to the console
+// ConsoleTracer is a simple tracer that logs to the console
 type ConsoleTracer struct {
-	mu sync.Mutex
+	mu    sync.Mutex
+	spans map[string]*Span
 }
 
 // NewConsoleTracer creates a new console tracer
 func NewConsoleTracer() *ConsoleTracer {
-	return &ConsoleTracer{}
+	return &ConsoleTracer{
+		spans: make(map[string]*Span),
+	}
 }
 
 // StartSpan starts a new span
@@ -131,8 +135,8 @@ func (t *ConsoleTracer) StartSpan(ctx context.Context, name string, opts ...Span
 
 	// Create a new span
 	span := &Span{
-		ID:         fmt.Sprintf("span-%d", time.Now().UnixNano()),
-		TraceID:    fmt.Sprintf("trace-%d", time.Now().UnixNano()),
+		ID:         generateID(),
+		TraceID:    generateID(),
 		Name:       name,
 		StartTime:  time.Now(),
 		Attributes: make(map[string]interface{}),
@@ -145,101 +149,63 @@ func (t *ConsoleTracer) StartSpan(ctx context.Context, name string, opts ...Span
 		opt(span)
 	}
 
-	// Get the parent span from the context
-	if parent, ok := ctx.Value(spanKey{}).(*Span); ok && span.ParentID == "" {
-		span.ParentID = parent.ID
-		span.TraceID = parent.TraceID
-		parent.Children = append(parent.Children, span)
+	// Store the span
+	t.spans[span.ID] = span
+
+	// Add to parent if exists
+	if span.ParentID != "" {
+		if parent, ok := t.spans[span.ParentID]; ok {
+			parent.Children = append(parent.Children, span)
+		}
 	}
 
-	// Log the span start
-	fmt.Printf("[TRACE] %s: Started span %s (trace: %s, parent: %s)\n",
-		span.StartTime.Format(time.RFC3339),
-		span.Name,
-		span.TraceID,
-		span.ParentID)
+	// Store in context
+	ctx = context.WithValue(ctx, spanKey{}, span)
 
-	// Store the span in the context
-	return context.WithValue(ctx, spanKey{}, span), span
+	fmt.Printf("Started span: %s (%s)\n", span.Name, span.ID)
+	return ctx, span
 }
 
 // EndSpan ends a span
-func (t *ConsoleTracer) EndSpan(ctx context.Context, status SpanStatus, err error) {
+func (t *ConsoleTracer) EndSpan(ctx context.Context, status SpanStatus) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	// Get the span from the context
+	// Get the current span
 	span, ok := ctx.Value(spanKey{}).(*Span)
 	if !ok {
+		fmt.Println("No span in context")
 		return
 	}
 
-	// Set the end time and status
+	// Update the span
 	span.EndTime = time.Now()
 	span.Status = status
 
-	// Add error information
-	if err != nil {
-		span.Attributes["error"] = err.Error()
-	}
-
-	// Calculate the duration
-	duration := span.EndTime.Sub(span.StartTime)
-
-	// Log the span end
-	fmt.Printf("[TRACE] %s: Ended span %s (trace: %s, duration: %s, status: %s)\n",
-		span.EndTime.Format(time.RFC3339),
-		span.Name,
-		span.TraceID,
-		duration,
-		span.Status)
-
-	// Log attributes
-	if len(span.Attributes) > 0 {
-		fmt.Printf("[TRACE] Attributes: %v\n", span.Attributes)
-	}
-
-	// Log events
-	for _, event := range span.Events {
-		fmt.Printf("[TRACE] Event: %s at %s\n",
-			event.Name,
-			event.Time.Format(time.RFC3339))
-		if len(event.Attributes) > 0 {
-			fmt.Printf("[TRACE] Event attributes: %v\n", event.Attributes)
-		}
-	}
+	fmt.Printf("Ended span: %s (%s) - %v\n", span.Name, span.ID, span.EndTime.Sub(span.StartTime))
 }
 
 // AddEvent adds an event to the current span
-func (t *ConsoleTracer) AddEvent(ctx context.Context, name string, attrs map[string]interface{}) {
+func (t *ConsoleTracer) AddEvent(ctx context.Context, name string, attributes map[string]interface{}) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	// Get the span from the context
+	// Get the current span
 	span, ok := ctx.Value(spanKey{}).(*Span)
 	if !ok {
+		fmt.Println("No span in context")
 		return
 	}
 
-	// Create the event
+	// Add the event
 	event := SpanEvent{
 		Name:       name,
 		Time:       time.Now(),
-		Attributes: attrs,
+		Attributes: attributes,
 	}
-
-	// Add the event to the span
 	span.Events = append(span.Events, event)
 
-	// Log the event
-	fmt.Printf("[TRACE] %s: Event %s on span %s (trace: %s)\n",
-		event.Time.Format(time.RFC3339),
-		event.Name,
-		span.Name,
-		span.TraceID)
-	if len(event.Attributes) > 0 {
-		fmt.Printf("[TRACE] Event attributes: %v\n", event.Attributes)
-	}
+	fmt.Printf("Added event to span: %s - %s\n", span.Name, name)
 }
 
 // SetAttribute sets an attribute on the current span
@@ -247,46 +213,100 @@ func (t *ConsoleTracer) SetAttribute(ctx context.Context, key string, value inte
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	// Get the span from the context
+	// Get the current span
 	span, ok := ctx.Value(spanKey{}).(*Span)
 	if !ok {
+		fmt.Println("No span in context")
 		return
 	}
 
 	// Set the attribute
 	span.Attributes[key] = value
 
-	// Log the attribute
-	fmt.Printf("[TRACE] %s: Set attribute %s=%v on span %s (trace: %s)\n",
-		time.Now().Format(time.RFC3339),
-		key,
-		value,
-		span.Name,
-		span.TraceID)
+	fmt.Printf("Set attribute on span: %s - %s=%v\n", span.Name, key, value)
 }
 
 // Flush flushes any pending spans
-func (t *ConsoleTracer) Flush(ctx context.Context) error {
-	// Nothing to do for console tracer
+func (t *ConsoleTracer) Flush() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	// Print all spans
+	for _, span := range t.spans {
+		if span.ParentID == "" {
+			t.printSpan(span, 0)
+		}
+	}
+
+	// Clear spans
+	t.spans = make(map[string]*Span)
+
 	return nil
 }
 
-// FileTracer is a tracer that logs to a file
+// printSpan prints a span and its children
+func (t *ConsoleTracer) printSpan(span *Span, indent int) {
+	// Print the span
+	indentStr := ""
+	for i := 0; i < indent; i++ {
+		indentStr += "  "
+	}
+
+	fmt.Printf("%sSpan: %s (%s)\n", indentStr, span.Name, span.ID)
+	fmt.Printf("%s  Duration: %v\n", indentStr, span.EndTime.Sub(span.StartTime))
+	fmt.Printf("%s  Status: %v\n", indentStr, span.Status)
+
+	// Print attributes
+	if len(span.Attributes) > 0 {
+		fmt.Printf("%s  Attributes:\n", indentStr)
+		for k, v := range span.Attributes {
+			fmt.Printf("%s    %s: %v\n", indentStr, k, v)
+		}
+	}
+
+	// Print events
+	if len(span.Events) > 0 {
+		fmt.Printf("%s  Events:\n", indentStr)
+		for _, event := range span.Events {
+			fmt.Printf("%s    %s (%v)\n", indentStr, event.Name, event.Time.Sub(span.StartTime))
+			if len(event.Attributes) > 0 {
+				for k, v := range event.Attributes {
+					fmt.Printf("%s      %s: %v\n", indentStr, k, v)
+				}
+			}
+		}
+	}
+
+	// Print children
+	for _, child := range span.Children {
+		t.printSpan(child, indent+1)
+	}
+}
+
+// generateID generates a unique ID
+func generateID() string {
+	return fmt.Sprintf("%d", time.Now().UnixNano())
+}
+
+// FileTracer is a tracer that writes to a file
 type FileTracer struct {
-	file *os.File
-	mu   sync.Mutex
+	mu       sync.Mutex
+	spans    map[string]*Span
+	file     *os.File
+	filename string
 }
 
 // NewFileTracer creates a new file tracer
-func NewFileTracer(path string) (*FileTracer, error) {
-	// Open the file
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+func NewFileTracer(filename string) (*FileTracer, error) {
+	file, err := os.Create(filename)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open trace file: %w", err)
+		return nil, fmt.Errorf("failed to create trace file: %w", err)
 	}
 
 	return &FileTracer{
-		file: file,
+		spans:    make(map[string]*Span),
+		file:     file,
+		filename: filename,
 	}, nil
 }
 
@@ -297,8 +317,8 @@ func (t *FileTracer) StartSpan(ctx context.Context, name string, opts ...SpanOpt
 
 	// Create a new span
 	span := &Span{
-		ID:         fmt.Sprintf("span-%d", time.Now().UnixNano()),
-		TraceID:    fmt.Sprintf("trace-%d", time.Now().UnixNano()),
+		ID:         generateID(),
+		TraceID:    generateID(),
 		Name:       name,
 		StartTime:  time.Now(),
 		Attributes: make(map[string]interface{}),
@@ -311,101 +331,82 @@ func (t *FileTracer) StartSpan(ctx context.Context, name string, opts ...SpanOpt
 		opt(span)
 	}
 
-	// Get the parent span from the context
-	if parent, ok := ctx.Value(spanKey{}).(*Span); ok && span.ParentID == "" {
-		span.ParentID = parent.ID
-		span.TraceID = parent.TraceID
-		parent.Children = append(parent.Children, span)
+	// Store the span
+	t.spans[span.ID] = span
+
+	// Add to parent if exists
+	if span.ParentID != "" {
+		if parent, ok := t.spans[span.ParentID]; ok {
+			parent.Children = append(parent.Children, span)
+		}
 	}
 
-	// Log the span start
-	t.file.WriteString(fmt.Sprintf("[TRACE] %s: Started span %s (trace: %s, parent: %s)\n",
-		span.StartTime.Format(time.RFC3339),
-		span.Name,
-		span.TraceID,
-		span.ParentID))
+	// Store in context
+	ctx = context.WithValue(ctx, spanKey{}, span)
 
-	// Store the span in the context
-	return context.WithValue(ctx, spanKey{}, span), span
+	// Write to file
+	t.writeEvent("start_span", map[string]interface{}{
+		"span_id":    span.ID,
+		"trace_id":   span.TraceID,
+		"parent_id":  span.ParentID,
+		"name":       span.Name,
+		"start_time": span.StartTime,
+		"attributes": span.Attributes,
+	})
+
+	return ctx, span
 }
 
 // EndSpan ends a span
-func (t *FileTracer) EndSpan(ctx context.Context, status SpanStatus, err error) {
+func (t *FileTracer) EndSpan(ctx context.Context, status SpanStatus) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	// Get the span from the context
+	// Get the current span
 	span, ok := ctx.Value(spanKey{}).(*Span)
 	if !ok {
 		return
 	}
 
-	// Set the end time and status
+	// Update the span
 	span.EndTime = time.Now()
 	span.Status = status
 
-	// Add error information
-	if err != nil {
-		span.Attributes["error"] = err.Error()
-	}
-
-	// Calculate the duration
-	duration := span.EndTime.Sub(span.StartTime)
-
-	// Log the span end
-	t.file.WriteString(fmt.Sprintf("[TRACE] %s: Ended span %s (trace: %s, duration: %s, status: %s)\n",
-		span.EndTime.Format(time.RFC3339),
-		span.Name,
-		span.TraceID,
-		duration,
-		span.Status))
-
-	// Log attributes
-	if len(span.Attributes) > 0 {
-		t.file.WriteString(fmt.Sprintf("[TRACE] Attributes: %v\n", span.Attributes))
-	}
-
-	// Log events
-	for _, event := range span.Events {
-		t.file.WriteString(fmt.Sprintf("[TRACE] Event: %s at %s\n",
-			event.Name,
-			event.Time.Format(time.RFC3339)))
-		if len(event.Attributes) > 0 {
-			t.file.WriteString(fmt.Sprintf("[TRACE] Event attributes: %v\n", event.Attributes))
-		}
-	}
+	// Write to file
+	t.writeEvent("end_span", map[string]interface{}{
+		"span_id":  span.ID,
+		"end_time": span.EndTime,
+		"status":   status,
+		"duration": span.EndTime.Sub(span.StartTime).Milliseconds(),
+	})
 }
 
 // AddEvent adds an event to the current span
-func (t *FileTracer) AddEvent(ctx context.Context, name string, attrs map[string]interface{}) {
+func (t *FileTracer) AddEvent(ctx context.Context, name string, attributes map[string]interface{}) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	// Get the span from the context
+	// Get the current span
 	span, ok := ctx.Value(spanKey{}).(*Span)
 	if !ok {
 		return
 	}
 
-	// Create the event
+	// Add the event
 	event := SpanEvent{
 		Name:       name,
 		Time:       time.Now(),
-		Attributes: attrs,
+		Attributes: attributes,
 	}
-
-	// Add the event to the span
 	span.Events = append(span.Events, event)
 
-	// Log the event
-	t.file.WriteString(fmt.Sprintf("[TRACE] %s: Event %s on span %s (trace: %s)\n",
-		event.Time.Format(time.RFC3339),
-		event.Name,
-		span.Name,
-		span.TraceID))
-	if len(event.Attributes) > 0 {
-		t.file.WriteString(fmt.Sprintf("[TRACE] Event attributes: %v\n", event.Attributes))
-	}
+	// Write to file
+	t.writeEvent("add_event", map[string]interface{}{
+		"span_id":    span.ID,
+		"event_name": name,
+		"event_time": event.Time,
+		"attributes": attributes,
+	})
 }
 
 // SetAttribute sets an attribute on the current span
@@ -413,7 +414,7 @@ func (t *FileTracer) SetAttribute(ctx context.Context, key string, value interfa
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	// Get the span from the context
+	// Get the current span
 	span, ok := ctx.Value(spanKey{}).(*Span)
 	if !ok {
 		return
@@ -422,24 +423,33 @@ func (t *FileTracer) SetAttribute(ctx context.Context, key string, value interfa
 	// Set the attribute
 	span.Attributes[key] = value
 
-	// Log the attribute
-	t.file.WriteString(fmt.Sprintf("[TRACE] %s: Set attribute %s=%v on span %s (trace: %s)\n",
-		time.Now().Format(time.RFC3339),
-		key,
-		value,
-		span.Name,
-		span.TraceID))
+	// Write to file
+	t.writeEvent("set_attribute", map[string]interface{}{
+		"span_id": span.ID,
+		"key":     key,
+		"value":   value,
+	})
 }
 
 // Flush flushes any pending spans
-func (t *FileTracer) Flush(ctx context.Context) error {
+func (t *FileTracer) Flush() error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
+	// Write all spans
+	for _, span := range t.spans {
+		if span.ParentID == "" {
+			t.writeSpan(span)
+		}
+	}
+
+	// Clear spans
+	t.spans = make(map[string]*Span)
 
 	return t.file.Sync()
 }
 
-// Close closes the file tracer
+// Close closes the tracer
 func (t *FileTracer) Close() error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -447,117 +457,210 @@ func (t *FileTracer) Close() error {
 	return t.file.Close()
 }
 
-// LLMTracer is a middleware that adds tracing to an LLM provider
-type LLMTracer struct {
-	provider core.LLMProvider
-	tracer   Tracer
-}
-
-// NewLLMTracer creates a new LLM tracer
-func NewLLMTracer(provider core.LLMProvider, tracer Tracer) *LLMTracer {
-	return &LLMTracer{
-		provider: provider,
-		tracer:   tracer,
-	}
-}
-
-// Name returns the name of the provider
-func (t *LLMTracer) Name() string {
-	return t.provider.Name() + "_traced"
-}
-
-// Generate generates a response for the given prompt
-func (t *LLMTracer) Generate(ctx context.Context, prompt *core.Prompt) (*core.Response, error) {
-	// Start a span
-	ctx, span := t.tracer.StartSpan(ctx, "llm.generate", WithAttributes(map[string]interface{}{
-		"provider": t.provider.Name(),
-		"prompt":   prompt.Text,
-	}))
-
-	// Generate a response
-	response, err := t.provider.Generate(ctx, prompt)
-
-	// Add response information
-	if response != nil {
-		t.tracer.SetAttribute(ctx, "response.text", response.Text)
-		if response.TokensUsed != nil {
-			t.tracer.SetAttribute(ctx, "response.tokens.prompt", response.TokensUsed.Prompt)
-			t.tracer.SetAttribute(ctx, "response.tokens.completion", response.TokensUsed.Completion)
-			t.tracer.SetAttribute(ctx, "response.tokens.total", response.TokensUsed.Total)
-		}
-		t.tracer.SetAttribute(ctx, "response.finish_reason", response.FinishReason)
+// writeEvent writes an event to the file
+func (t *FileTracer) writeEvent(eventType string, data map[string]interface{}) {
+	event := map[string]interface{}{
+		"type":      eventType,
+		"timestamp": time.Now(),
+		"data":      data,
 	}
 
-	// End the span
+	bytes, err := json.Marshal(event)
 	if err != nil {
-		t.tracer.EndSpan(ctx, SpanStatusError, err)
-	} else {
-		t.tracer.EndSpan(ctx, SpanStatusOK, nil)
+		fmt.Fprintf(os.Stderr, "Failed to marshal trace event: %v\n", err)
+		return
 	}
 
-	return response, err
-}
-
-// GenerateStream generates a streaming response for the given prompt
-func (t *LLMTracer) GenerateStream(ctx context.Context, prompt *core.Prompt) (core.ResponseStream, error) {
-	// Start a span
-	ctx, span := t.tracer.StartSpan(ctx, "llm.generate_stream", WithAttributes(map[string]interface{}{
-		"provider": t.provider.Name(),
-		"prompt":   prompt.Text,
-	}))
-
-	// Generate a streaming response
-	stream, err := t.provider.GenerateStream(ctx, prompt)
+	_, err = t.file.Write(append(bytes, '\n'))
 	if err != nil {
-		t.tracer.EndSpan(ctx, SpanStatusError, err)
-		return nil, err
+		fmt.Fprintf(os.Stderr, "Failed to write trace event: %v\n", err)
 	}
-
-	// Wrap the stream with tracing
-	return &tracedResponseStream{
-		stream: stream,
-		tracer: t.tracer,
-		ctx:    ctx,
-	}, nil
 }
 
-// tracedResponseStream wraps a ResponseStream with tracing
-type tracedResponseStream struct {
-	stream core.ResponseStream
-	tracer Tracer
-	ctx    context.Context
-	chunks int
+// writeSpan writes a span and its children to the file
+func (t *FileTracer) writeSpan(span *Span) {
+	// Write the span
+	t.writeEvent("span", map[string]interface{}{
+		"span_id":    span.ID,
+		"trace_id":   span.TraceID,
+		"parent_id":  span.ParentID,
+		"name":       span.Name,
+		"start_time": span.StartTime,
+		"end_time":   span.EndTime,
+		"status":     span.Status,
+		"attributes": span.Attributes,
+		"events":     span.Events,
+	})
+
+	// Write children
+	for _, child := range span.Children {
+		t.writeSpan(child)
+	}
 }
 
-// Next returns the next chunk of the response
-func (s *tracedResponseStream) Next() (*core.ResponseChunk, error) {
-	// Get the next chunk
-	chunk, err := s.stream.Next()
+// StreamTracer is a tracer that streams events to a writer
+type StreamTracer struct {
+	mu     sync.Mutex
+	spans  map[string]*Span
+	writer io.Writer
+}
 
-	// Add chunk information
-	if chunk != nil {
-		s.chunks++
-		s.tracer.AddEvent(s.ctx, "stream.chunk", map[string]interface{}{
-			"chunk":    s.chunks,
-			"text":     chunk.Text,
-			"is_final": chunk.IsFinal,
-		})
+// NewStreamTracer creates a new stream tracer
+func NewStreamTracer(writer io.Writer) *StreamTracer {
+	return &StreamTracer{
+		spans:  make(map[string]*Span),
+		writer: writer,
+	}
+}
+
+// StartSpan starts a new span
+func (t *StreamTracer) StartSpan(ctx context.Context, name string, opts ...SpanOption) (context.Context, *Span) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	// Create a new span
+	span := &Span{
+		ID:         generateID(),
+		TraceID:    generateID(),
+		Name:       name,
+		StartTime:  time.Now(),
+		Attributes: make(map[string]interface{}),
+		Events:     make([]SpanEvent, 0),
+		Children:   make([]*Span, 0),
 	}
 
-	// End the span if the stream is done
-	if err != nil {
-		if err == io.EOF {
-			s.tracer.SetAttribute(s.ctx, "stream.chunks", s.chunks)
-			s.tracer.EndSpan(s.ctx, SpanStatusOK, nil)
-		} else {
-			s.tracer.EndSpan(s.ctx, SpanStatusError, err)
+	// Apply options
+	for _, opt := range opts {
+		opt(span)
+	}
+
+	// Store the span
+	t.spans[span.ID] = span
+
+	// Add to parent if exists
+	if span.ParentID != "" {
+		if parent, ok := t.spans[span.ParentID]; ok {
+			parent.Children = append(parent.Children, span)
 		}
 	}
 
-	return chunk, err
+	// Store in context
+	ctx = context.WithValue(ctx, spanKey{}, span)
+
+	// Write to stream
+	t.writeEvent("start_span", map[string]interface{}{
+		"span_id":    span.ID,
+		"trace_id":   span.TraceID,
+		"parent_id":  span.ParentID,
+		"name":       span.Name,
+		"start_time": span.StartTime,
+		"attributes": span.Attributes,
+	})
+
+	return ctx, span
 }
 
-// Close closes the stream
-func (s *tracedResponseStream) Close() error {
-	return s.stream.Close()
+// EndSpan ends a span
+func (t *StreamTracer) EndSpan(ctx context.Context, status SpanStatus) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	// Get the current span
+	span, ok := ctx.Value(spanKey{}).(*Span)
+	if !ok {
+		return
+	}
+
+	// Update the span
+	span.EndTime = time.Now()
+	span.Status = status
+
+	// Write to stream
+	t.writeEvent("end_span", map[string]interface{}{
+		"span_id":  span.ID,
+		"end_time": span.EndTime,
+		"status":   status,
+		"duration": span.EndTime.Sub(span.StartTime).Milliseconds(),
+	})
+}
+
+// AddEvent adds an event to the current span
+func (t *StreamTracer) AddEvent(ctx context.Context, name string, attributes map[string]interface{}) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	// Get the current span
+	span, ok := ctx.Value(spanKey{}).(*Span)
+	if !ok {
+		return
+	}
+
+	// Add the event
+	event := SpanEvent{
+		Name:       name,
+		Time:       time.Now(),
+		Attributes: attributes,
+	}
+	span.Events = append(span.Events, event)
+
+	// Write to stream
+	t.writeEvent("add_event", map[string]interface{}{
+		"span_id":    span.ID,
+		"event_name": name,
+		"event_time": event.Time,
+		"attributes": attributes,
+	})
+}
+
+// SetAttribute sets an attribute on the current span
+func (t *StreamTracer) SetAttribute(ctx context.Context, key string, value interface{}) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	// Get the current span
+	span, ok := ctx.Value(spanKey{}).(*Span)
+	if !ok {
+		return
+	}
+
+	// Set the attribute
+	span.Attributes[key] = value
+
+	// Write to stream
+	t.writeEvent("set_attribute", map[string]interface{}{
+		"span_id": span.ID,
+		"key":     key,
+		"value":   value,
+	})
+}
+
+// Flush flushes any pending spans
+func (t *StreamTracer) Flush() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	// Clear spans
+	t.spans = make(map[string]*Span)
+
+	return nil
+}
+
+// writeEvent writes an event to the stream
+func (t *StreamTracer) writeEvent(eventType string, data map[string]interface{}) {
+	event := map[string]interface{}{
+		"type":      eventType,
+		"timestamp": time.Now(),
+		"data":      data,
+	}
+
+	bytes, err := json.Marshal(event)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to marshal trace event: %v\n", err)
+		return
+	}
+
+	_, err = t.writer.Write(append(bytes, '\n'))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to write trace event: %v\n", err)
+	}
 }

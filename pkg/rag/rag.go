@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
+	"math"
+	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
 
 	"github.com/GeoloeG-IsT/gollem/pkg/core"
 )
@@ -20,442 +23,505 @@ type Document struct {
 	// Content is the text content of the document
 	Content string
 
-	// Metadata contains additional information about the document
+	// Metadata is additional information about the document
 	Metadata map[string]interface{}
+
+	// Embedding is the vector representation of the document
+	Embedding []float32
 }
 
-// DocumentLoader loads documents from various sources
-type DocumentLoader interface {
-	// LoadDocument loads a document from a source
-	LoadDocument(ctx context.Context, source string) (*Document, error)
+// Chunk represents a chunk of a document
+type Chunk struct {
+	// ID is a unique identifier for the chunk
+	ID string
 
-	// LoadDocuments loads multiple documents from a source
-	LoadDocuments(ctx context.Context, source string) ([]*Document, error)
+	// DocumentID is the ID of the document this chunk belongs to
+	DocumentID string
+
+	// Content is the text content of the chunk
+	Content string
+
+	// Metadata is additional information about the chunk
+	Metadata map[string]interface{}
+
+	// Embedding is the vector representation of the chunk
+	Embedding []float32
 }
 
-// TextSplitter splits text into chunks
-type TextSplitter interface {
-	// SplitText splits text into chunks
-	SplitText(text string, options ...SplitOption) []string
+// RAG represents a Retrieval-Augmented Generation system
+type RAG struct {
+	// VectorStore is the vector store used for retrieval
+	VectorStore VectorStore
 
-	// SplitDocument splits a document into multiple documents
-	SplitDocument(doc *Document, options ...SplitOption) []*Document
+	// Embeddings is the embeddings provider
+	Embeddings EmbeddingsProvider
+
+	// ChunkSize is the size of each chunk
+	ChunkSize int
+
+	// ChunkOverlap is the overlap between chunks
+	ChunkOverlap int
+
+	// TopK is the number of chunks to retrieve
+	TopK int
 }
 
-// SplitOption configures a text splitter
-type SplitOption func(interface{})
+// RAGOption is a function that configures a RAG
+type RAGOption func(*RAG)
+
+// WithVectorStore sets the vector store
+func WithVectorStore(vectorStore VectorStore) RAGOption {
+	return func(r *RAG) {
+		r.VectorStore = vectorStore
+	}
+}
+
+// WithEmbeddings sets the embeddings provider
+func WithEmbeddings(embeddings EmbeddingsProvider) RAGOption {
+	return func(r *RAG) {
+		r.Embeddings = embeddings
+	}
+}
 
 // WithChunkSize sets the chunk size
-func WithChunkSize(size int) SplitOption {
-	return func(s interface{}) {
-		if ts, ok := s.(*CharacterTextSplitter); ok {
-			ts.chunkSize = size
-		}
+func WithChunkSize(chunkSize int) RAGOption {
+	return func(r *RAG) {
+		r.ChunkSize = chunkSize
 	}
 }
 
 // WithChunkOverlap sets the chunk overlap
-func WithChunkOverlap(overlap int) SplitOption {
-	return func(s interface{}) {
-		if ts, ok := s.(*CharacterTextSplitter); ok {
-			ts.chunkOverlap = overlap
-		}
+func WithChunkOverlap(chunkOverlap int) RAGOption {
+	return func(r *RAG) {
+		r.ChunkOverlap = chunkOverlap
 	}
 }
 
-// CharacterTextSplitter splits text by character count
-type CharacterTextSplitter struct {
-	chunkSize    int
-	chunkOverlap int
-	separator    string
+// WithTopK sets the number of chunks to retrieve
+func WithTopK(topK int) RAGOption {
+	return func(r *RAG) {
+		r.TopK = topK
+	}
 }
 
-// NewCharacterTextSplitter creates a new character text splitter
-func NewCharacterTextSplitter(options ...SplitOption) *CharacterTextSplitter {
-	splitter := &CharacterTextSplitter{
-		chunkSize:    1000,
-		chunkOverlap: 200,
-		separator:    "\n",
+// NewRAG creates a new RAG system
+func NewRAG(options ...RAGOption) (*RAG, error) {
+	rag := &RAG{
+		ChunkSize:    1000,
+		ChunkOverlap: 200,
+		TopK:         3,
 	}
 
 	for _, option := range options {
-		option(splitter)
+		option(rag)
 	}
 
-	return splitter
+	if rag.VectorStore == nil {
+		return nil, errors.New("vector store is required")
+	}
+
+	if rag.Embeddings == nil {
+		return nil, errors.New("embeddings provider is required")
+	}
+
+	return rag, nil
 }
 
-// SplitText splits text into chunks
-func (s *CharacterTextSplitter) SplitText(text string, options ...SplitOption) []string {
-	// Apply options
-	for _, option := range options {
-		option(s)
+// AddDocument adds a document to the RAG system
+func (r *RAG) AddDocument(ctx context.Context, document *Document) error {
+	// Generate embeddings for the document if not already present
+	if document.Embedding == nil {
+		embedding, err := r.Embeddings.EmbedDocument(ctx, document.Content)
+		if err != nil {
+			return fmt.Errorf("failed to embed document: %w", err)
+		}
+		document.Embedding = embedding
 	}
 
-	// Split the text by separator
-	parts := strings.Split(text, s.separator)
+	// Chunk the document
+	chunks := r.chunkDocument(document)
 
-	// Combine parts into chunks
-	var chunks []string
-	var currentChunk strings.Builder
-	var currentSize int
-
-	for _, part := range parts {
-		// If adding this part would exceed the chunk size, start a new chunk
-		if currentSize+len(part)+len(s.separator) > s.chunkSize && currentSize > 0 {
-			chunks = append(chunks, currentChunk.String())
-
-			// Start a new chunk with overlap
-			if s.chunkOverlap > 0 {
-				// Get the last part of the previous chunk for overlap
-				prevChunk := currentChunk.String()
-				overlapStart := len(prevChunk) - s.chunkOverlap
-				if overlapStart < 0 {
-					overlapStart = 0
-				}
-				overlap := prevChunk[overlapStart:]
-
-				currentChunk = strings.Builder{}
-				currentChunk.WriteString(overlap)
-				currentSize = len(overlap)
-			} else {
-				currentChunk = strings.Builder{}
-				currentSize = 0
-			}
+	// Generate embeddings for each chunk
+	for i := range chunks {
+		embedding, err := r.Embeddings.EmbedDocument(ctx, chunks[i].Content)
+		if err != nil {
+			return fmt.Errorf("failed to embed chunk: %w", err)
 		}
-
-		// Add the part to the current chunk
-		if currentSize > 0 {
-			currentChunk.WriteString(s.separator)
-			currentSize += len(s.separator)
-		}
-		currentChunk.WriteString(part)
-		currentSize += len(part)
+		chunks[i].Embedding = embedding
 	}
 
-	// Add the last chunk if it's not empty
-	if currentSize > 0 {
-		chunks = append(chunks, currentChunk.String())
+	// Add the chunks to the vector store
+	if err := r.VectorStore.AddChunks(ctx, chunks); err != nil {
+		return fmt.Errorf("failed to add chunks to vector store: %w", err)
+	}
+
+	return nil
+}
+
+// AddDocuments adds multiple documents to the RAG system
+func (r *RAG) AddDocuments(ctx context.Context, documents []*Document) error {
+	for _, document := range documents {
+		if err := r.AddDocument(ctx, document); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Query retrieves relevant chunks for a query and generates a response
+func (r *RAG) Query(ctx context.Context, query string, llm core.LLMProvider) (*core.Response, error) {
+	// Retrieve relevant chunks
+	chunks, err := r.RetrieveChunks(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve chunks: %w", err)
+	}
+
+	// Create a prompt with the retrieved chunks
+	prompt := r.createPrompt(query, chunks)
+
+	// Generate a response
+	response, err := llm.Generate(ctx, prompt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate response: %w", err)
+	}
+
+	return response, nil
+}
+
+// RetrieveChunks retrieves relevant chunks for a query
+func (r *RAG) RetrieveChunks(ctx context.Context, query string) ([]*Chunk, error) {
+	// Generate embedding for the query
+	embedding, err := r.Embeddings.EmbedQuery(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to embed query: %w", err)
+	}
+
+	// Retrieve chunks from the vector store
+	chunks, err := r.VectorStore.SimilaritySearch(ctx, embedding, r.TopK)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search vector store: %w", err)
+	}
+
+	return chunks, nil
+}
+
+// chunkDocument chunks a document into smaller pieces
+func (r *RAG) chunkDocument(document *Document) []*Chunk {
+	content := document.Content
+	chunkSize := r.ChunkSize
+	chunkOverlap := r.ChunkOverlap
+
+	// If the content is smaller than the chunk size, return a single chunk
+	if len(content) <= chunkSize {
+		return []*Chunk{
+			{
+				ID:         fmt.Sprintf("%s-0", document.ID),
+				DocumentID: document.ID,
+				Content:    content,
+				Metadata:   document.Metadata,
+			},
+		}
+	}
+
+	// Split the content into chunks
+	var chunks []*Chunk
+	for i := 0; i < len(content); i += chunkSize - chunkOverlap {
+		end := i + chunkSize
+		if end > len(content) {
+			end = len(content)
+		}
+
+		chunks = append(chunks, &Chunk{
+			ID:         fmt.Sprintf("%s-%d", document.ID, i),
+			DocumentID: document.ID,
+			Content:    content[i:end],
+			Metadata:   document.Metadata,
+		})
+
+		if end == len(content) {
+			break
+		}
 	}
 
 	return chunks
 }
 
-// SplitDocument splits a document into multiple documents
-func (s *CharacterTextSplitter) SplitDocument(doc *Document, options ...SplitOption) []*Document {
-	// Split the text
-	chunks := s.SplitText(doc.Content, options...)
+// createPrompt creates a prompt with the retrieved chunks
+func (r *RAG) createPrompt(query string, chunks []*Chunk) *core.Prompt {
+	var sb strings.Builder
 
-	// Create a new document for each chunk
-	docs := make([]*Document, len(chunks))
+	sb.WriteString("Answer the following question based on the provided context:\n\n")
+	sb.WriteString("Context:\n")
+
 	for i, chunk := range chunks {
-		docs[i] = &Document{
-			ID:       fmt.Sprintf("%s_chunk_%d", doc.ID, i),
-			Content:  chunk,
-			Metadata: doc.Metadata,
+		sb.WriteString(fmt.Sprintf("--- Document %d ---\n", i+1))
+		sb.WriteString(chunk.Content)
+		sb.WriteString("\n\n")
+	}
+
+	sb.WriteString("Question: ")
+	sb.WriteString(query)
+
+	return core.NewPrompt(sb.String())
+}
+
+// LoadDocumentsFromDirectory loads documents from a directory
+func LoadDocumentsFromDirectory(directory string, fileExtensions []string) ([]*Document, error) {
+	var documents []*Document
+
+	err := filepath.Walk(directory, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
 		}
-	}
 
-	return docs
-}
+		if info.IsDir() {
+			return nil
+		}
 
-// FileLoader loads documents from files
-type FileLoader struct {
-	// BasePath is the base path for relative file paths
-	BasePath string
-}
+		// Check if the file has one of the specified extensions
+		ext := strings.ToLower(filepath.Ext(path))
+		if len(fileExtensions) > 0 {
+			found := false
+			for _, validExt := range fileExtensions {
+				if ext == validExt || ext == "."+validExt {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return nil
+			}
+		}
 
-// NewFileLoader creates a new file loader
-func NewFileLoader(basePath string) *FileLoader {
-	return &FileLoader{
-		BasePath: basePath,
-	}
-}
+		// Read the file
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("failed to read file %s: %w", path, err)
+		}
 
-// LoadDocument loads a document from a file
-func (l *FileLoader) LoadDocument(ctx context.Context, source string) (*Document, error) {
-	// Check if the context is canceled
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
-	}
+		// Create a document
+		relPath, err := filepath.Rel(directory, path)
+		if err != nil {
+			relPath = path
+		}
 
-	// Resolve the path
-	path := source
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(l.BasePath, path)
-	}
+		document := &Document{
+			ID:      relPath,
+			Content: string(content),
+			Metadata: map[string]interface{}{
+				"path":      path,
+				"extension": ext,
+				"size":      info.Size(),
+				"modified":  info.ModTime(),
+			},
+		}
 
-	// Open the file
-	file, err := os.Open(path)
+		documents = append(documents, document)
+		return nil
+	})
+
 	if err != nil {
-		return nil, fmt.Errorf("failed to open file: %w", err)
+		return nil, fmt.Errorf("failed to walk directory: %w", err)
 	}
-	defer file.Close()
 
+	return documents, nil
+}
+
+// LoadDocumentFromFile loads a document from a file
+func LoadDocumentFromFile(path string) (*Document, error) {
 	// Read the file
-	content, err := io.ReadAll(file)
+	content, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file: %w", err)
 	}
 
 	// Create a document
-	doc := &Document{
+	document := &Document{
 		ID:      filepath.Base(path),
 		Content: string(content),
 		Metadata: map[string]interface{}{
-			"path": path,
-			"type": "file",
+			"path":      path,
+			"extension": strings.ToLower(filepath.Ext(path)),
 		},
 	}
 
-	return doc, nil
+	return document, nil
 }
 
-// LoadDocuments loads multiple documents from a directory
-func (l *FileLoader) LoadDocuments(ctx context.Context, source string) ([]*Document, error) {
-	// Check if the context is canceled
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
-	}
-
-	// Resolve the path
-	path := source
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(l.BasePath, path)
-	}
-
-	// Get file info
-	info, err := os.Stat(path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to stat path: %w", err)
-	}
-
-	// If it's a file, load it as a single document
-	if !info.IsDir() {
-		doc, err := l.LoadDocument(ctx, path)
-		if err != nil {
-			return nil, err
-		}
-		return []*Document{doc}, nil
-	}
-
-	// If it's a directory, load all files in it
-	files, err := os.ReadDir(path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read directory: %w", err)
-	}
-
-	var docs []*Document
-	for _, file := range files {
-		// Skip directories
-		if file.IsDir() {
-			continue
-		}
-
-		// Load the document
-		doc, err := l.LoadDocument(ctx, filepath.Join(path, file.Name()))
-		if err != nil {
-			return nil, err
-		}
-
-		docs = append(docs, doc)
-	}
-
-	return docs, nil
-}
-
-// VectorStore is an interface for storing and retrieving document vectors
+// VectorStore is an interface for vector stores
 type VectorStore interface {
-	// AddDocuments adds documents to the store
-	AddDocuments(ctx context.Context, docs []*Document) error
+	// AddChunks adds chunks to the vector store
+	AddChunks(ctx context.Context, chunks []*Chunk) error
 
-	// SimilaritySearch searches for similar documents
-	SimilaritySearch(ctx context.Context, query string, k int) ([]*Document, error)
+	// SimilaritySearch searches for chunks similar to the query embedding
+	SimilaritySearch(ctx context.Context, embedding []float32, limit int) ([]*Chunk, error)
 
-	// Clear removes all documents from the store
+	// Delete deletes chunks from the vector store
+	Delete(ctx context.Context, ids []string) error
+
+	// Clear clears the vector store
 	Clear(ctx context.Context) error
 }
 
-// EmbeddingProvider generates embeddings for text
-type EmbeddingProvider interface {
+// EmbeddingsProvider is an interface for embeddings providers
+type EmbeddingsProvider interface {
+	// EmbedDocument generates an embedding for a document
+	EmbedDocument(ctx context.Context, text string) ([]float32, error)
+
 	// EmbedQuery generates an embedding for a query
 	EmbedQuery(ctx context.Context, text string) ([]float32, error)
-
-	// EmbedDocuments generates embeddings for documents
-	EmbedDocuments(ctx context.Context, texts []string) ([][]float32, error)
 }
 
 // MemoryVectorStore is an in-memory implementation of VectorStore
 type MemoryVectorStore struct {
-	embeddings EmbeddingProvider
-	documents  []*Document
-	vectors    [][]float32
+	chunks     []*Chunk
+	embeddings EmbeddingsProvider
+	mu         sync.Mutex
 }
 
-// NewMemoryVectorStore creates a new memory vector store
-func NewMemoryVectorStore(embeddings EmbeddingProvider) *MemoryVectorStore {
+// NewMemoryVectorStore creates a new in-memory vector store
+func NewMemoryVectorStore(embeddings EmbeddingsProvider) *MemoryVectorStore {
 	return &MemoryVectorStore{
+		chunks:     make([]*Chunk, 0),
 		embeddings: embeddings,
-		documents:  make([]*Document, 0),
-		vectors:    make([][]float32, 0),
 	}
 }
 
-// AddDocuments adds documents to the store
-func (s *MemoryVectorStore) AddDocuments(ctx context.Context, docs []*Document) error {
-	// Extract the text from the documents
-	texts := make([]string, len(docs))
-	for i, doc := range docs {
-		texts[i] = doc.Content
-	}
+// AddChunks adds chunks to the vector store
+func (s *MemoryVectorStore) AddChunks(ctx context.Context, chunks []*Chunk) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	// Generate embeddings for the documents
-	vectors, err := s.embeddings.EmbedDocuments(ctx, texts)
-	if err != nil {
-		return fmt.Errorf("failed to embed documents: %w", err)
-	}
-
-	// Add the documents and vectors to the store
-	s.documents = append(s.documents, docs...)
-	s.vectors = append(s.vectors, vectors...)
+	// Add the chunks
+	s.chunks = append(s.chunks, chunks...)
 
 	return nil
 }
 
-// SimilaritySearch searches for similar documents
-func (s *MemoryVectorStore) SimilaritySearch(ctx context.Context, query string, k int) ([]*Document, error) {
-	// Check if we have any documents
-	if len(s.documents) == 0 {
-		return nil, errors.New("no documents in the store")
+// SimilaritySearch searches for chunks similar to the query embedding
+func (s *MemoryVectorStore) SimilaritySearch(ctx context.Context, embedding []float32, limit int) ([]*Chunk, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Calculate similarity scores
+	type chunkScore struct {
+		chunk *Chunk
+		score float32
 	}
 
-	// Generate an embedding for the query
-	queryVector, err := s.embeddings.EmbedQuery(ctx, query)
-	if err != nil {
-		return nil, fmt.Errorf("failed to embed query: %w", err)
+	scores := make([]chunkScore, 0, len(s.chunks))
+	for _, chunk := range s.chunks {
+		score := cosineSimilarity(embedding, chunk.Embedding)
+		scores = append(scores, chunkScore{chunk, score})
 	}
 
-	// Calculate the similarity between the query and each document
-	similarities := make([]float32, len(s.vectors))
-	for i, vector := range s.vectors {
-		similarities[i] = cosineSimilarity(queryVector, vector)
+	// Sort by score (highest first)
+	sort.Slice(scores, func(i, j int) bool {
+		return scores[i].score > scores[j].score
+	})
+
+	// Return the top chunks
+	result := make([]*Chunk, 0, limit)
+	for i := 0; i < limit && i < len(scores); i++ {
+		result = append(result, scores[i].chunk)
 	}
 
-	// Find the k most similar documents
-	indices := topK(similarities, k)
-
-	// Return the documents
-	results := make([]*Document, len(indices))
-	for i, idx := range indices {
-		results[i] = s.documents[idx]
-	}
-
-	return results, nil
+	return result, nil
 }
 
-// Clear removes all documents from the store
+// Delete deletes chunks from the vector store
+func (s *MemoryVectorStore) Delete(ctx context.Context, ids []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Create a map of IDs to delete
+	idMap := make(map[string]bool)
+	for _, id := range ids {
+		idMap[id] = true
+	}
+
+	// Filter out the chunks to delete
+	filtered := make([]*Chunk, 0, len(s.chunks))
+	for _, chunk := range s.chunks {
+		if !idMap[chunk.ID] {
+			filtered = append(filtered, chunk)
+		}
+	}
+
+	s.chunks = filtered
+
+	return nil
+}
+
+// Clear clears the vector store
 func (s *MemoryVectorStore) Clear(ctx context.Context) error {
-	s.documents = make([]*Document, 0)
-	s.vectors = make([][]float32, 0)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.chunks = make([]*Chunk, 0)
+
 	return nil
 }
 
 // cosineSimilarity calculates the cosine similarity between two vectors
 func cosineSimilarity(a, b []float32) float32 {
-	// Calculate the dot product
-	var dotProduct float32
-	for i := range a {
-		dotProduct += a[i] * b[i]
-	}
-
-	// Calculate the magnitudes
-	var magA, magB float32
-	for i := range a {
-		magA += a[i] * a[i]
-		magB += b[i] * b[i]
-	}
-	magA = float32(math.Sqrt(float64(magA)))
-	magB = float32(math.Sqrt(float64(magB)))
-
-	// Calculate the cosine similarity
-	if magA == 0 || magB == 0 {
+	if len(a) != len(b) {
 		return 0
 	}
-	return dotProduct / (magA * magB)
-}
 
-// topK returns the indices of the k largest elements in the slice
-func topK(values []float32, k int) []int {
-	// Create a slice of indices
-	indices := make([]int, len(values))
-	for i := range indices {
-		indices[i] = i
+	var dotProduct float32
+	var normA float32
+	var normB float32
+
+	for i := 0; i < len(a); i++ {
+		dotProduct += a[i] * b[i]
+		normA += a[i] * a[i]
+		normB += b[i] * b[i]
 	}
 
-	// Sort the indices by the values
-	sort.Slice(indices, func(i, j int) bool {
-		return values[indices[i]] > values[indices[j]]
-	})
-
-	// Return the top k indices
-	if k > len(indices) {
-		k = len(indices)
+	if normA == 0 || normB == 0 {
+		return 0
 	}
-	return indices[:k]
+
+	return dotProduct / (float32(math.Sqrt(float64(normA))) * float32(math.Sqrt(float64(normB))))
 }
 
-// RAG implements Retrieval Augmented Generation
-type RAG struct {
-	vectorStore VectorStore
-	llmProvider core.LLMProvider
-	textSplitter TextSplitter
+// RemoteVectorStore is a vector store that uses a remote API
+type RemoteVectorStore struct {
+	endpoint string
+	apiKey   string
+	client   *http.Client
 }
 
-// NewRAG creates a new RAG instance
-func NewRAG(vectorStore VectorStore, llmProvider core.LLMProvider, textSplitter TextSplitter) *RAG {
-	return &RAG{
-		vectorStore: vectorStore,
-		llmProvider: llmProvider,
-		textSplitter: textSplitter,
+// NewRemoteVectorStore creates a new remote vector store
+func NewRemoteVectorStore(endpoint, apiKey string) *RemoteVectorStore {
+	return &RemoteVectorStore{
+		endpoint: endpoint,
+		apiKey:   apiKey,
+		client:   &http.Client{},
 	}
 }
 
-// AddDocuments adds documents to the RAG system
-func (r *RAG) AddDocuments(ctx context.Context, docs []*Document) error {
-	// Split the documents
-	var splitDocs []*Document
-	for _, doc := range docs {
-		splitDocs = append(splitDocs, r.textSplitter.SplitDocument(doc)...)
-	}
-
-	// Add the documents to the vector store
-	return r.vectorStore.AddDocuments(ctx, splitDocs)
+// AddChunks adds chunks to the vector store
+func (s *RemoteVectorStore) AddChunks(ctx context.Context, chunks []*Chunk) error {
+	// In a real implementation, this would send the chunks to the remote API
+	return nil
 }
 
-// Query performs a RAG query
-func (r *RAG) Query(ctx context.Context, query string, k int) (*core.Response, error) {
-	// Search for similar documents
-	docs, err := r.vectorStore.SimilaritySearch(ctx, query, k)
-	if err != nil {
-		return nil, fmt.Errorf("failed to search for similar documents: %w", err)
-	}
+// SimilaritySearch searches for chunks similar to the query embedding
+func (s *RemoteVectorStore) SimilaritySearch(ctx context.Context, embedding []float32, limit int) ([]*Chunk, error) {
+	// In a real implementation, this would query the remote API
+	return nil, nil
+}
 
-	// Create a prompt with the retrieved documents
-	var promptBuilder strings.Builder
-	promptBuilder.WriteString("Answer the question based on the following context:\n\n")
-	
-	for i, doc := range docs {
-		promptBuilder.WriteString(fmt.Sprintf("Context %d:\n%s\n\n", i+1, doc.Content))
-	}
-	
-	promptBuilder.WriteString("Question: " + query)
-	
-	prompt := core.NewPrompt(promptBuilder.String())
-	
-	// Generate a response
-	return r.llmProvider.Generate(ctx, prompt)
+// Delete deletes chunks from the vector store
+func (s *RemoteVectorStore) Delete(ctx context.Context, ids []string) error {
+	// In a real implementation, this would delete the chunks from the remote API
+	return nil
+}
+
+// Clear clears the vector store
+func (s *RemoteVectorStore) Clear(ctx context.Context) error {
+	// In a real implementation, this would clear the remote vector store
+	return nil
 }
