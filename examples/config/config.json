@@ -1,0 +1,36 @@
+{
+  "default_provider": "mistral",
+  "providers": {
+    "openai": {
+      "type": "openai",
+      "api_key": "",
+      "model": "gpt-4"
+    },
+    "mistral": {
+      "type": "mistral",
+      "api_key": "",
+      "model": "mistral-medium"
+    }
+  },
+  "cache": {
+    "enabled": true,
+    "type": "memory",
+    "ttl": 3600,
+    "max_entries": 1000
+  },
+  "rag": {
+    "enabled": false,
+    "vector_store": "memory",
+    "embeddings": "openai",
+    "chunk_size": 1000,
+    "chunk_overlap": 200
+  },
+  "tracing": {
+    "enabled": false,
+    "type": "console",
+    "sample_rate": 1.0
+  },
+  "custom_provider_paths": [
+    "./custom_providers"
+  ]
+}
