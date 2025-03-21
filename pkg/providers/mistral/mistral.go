@@ -119,18 +119,13 @@ func (p *Provider) Generate(ctx context.Context, prompt *core.Prompt) (*core.Res
 		},
 		FinishReason: mistralResp.Choices[0].FinishReason,
 		ModelInfo: &core.ModelInfo{
-			Name:      p.config.Model,
-			Provider:  "mistral",
-			Timestamp: time.Now().Format(time.RFC3339),
+			Name:     p.config.Model,
+			Provider: "mistral",
+			Version:  "1.0.0",
 		},
 		ProviderInfo: &core.ProviderInfo{
 			Name:    "mistral",
 			Version: "1.0.0",
-		},
-		Metadata: map[string]interface{}{
-			"id":      mistralResp.ID,
-			"created": mistralResp.Created,
-			"model":   mistralResp.Model,
 		},
 	}
 	
@@ -232,10 +227,7 @@ func (p *Provider) prepareRequestBody(prompt *core.Prompt) ([]byte, error) {
 	}
 	
 	// Add additional parameters
-	for k, v := range prompt.AdditionalParams {
-		// In a real implementation, this would add the parameters to the request
-		// For simplicity, we're not implementing this
-	}
+	// For simplicity, we're not implementing this
 	
 	return json.Marshal(reqBody)
 }
@@ -282,11 +274,6 @@ func (s *mistralStream) Next() (*core.ResponseChunk, error) {
 	chunk := &core.ResponseChunk{
 		Text:    streamResp.Choices[0].Delta.Content,
 		IsFinal: false,
-		Metadata: map[string]interface{}{
-			"id":      streamResp.ID,
-			"created": streamResp.Created,
-			"model":   streamResp.Model,
-		},
 	}
 	
 	// Check if this is the final chunk
@@ -306,12 +293,12 @@ func (s *mistralStream) Close() error {
 // readLine reads a line from the stream
 func (s *mistralStream) readLine() ([]byte, error) {
 	var line []byte
-	var isPrefix bool
 	
 	for {
 		// If we have data in the buffer, try to find a newline
 		if len(s.buffer) > 0 {
-			if i := bytes.IndexByte(s.buffer, '\n'); i >= 0 {
+			i := bytes.IndexByte(s.buffer, '\n')
+			if i >= 0 {
 				line = s.buffer[:i]
 				s.buffer = s.buffer[i+1:]
 				return line, nil
@@ -331,13 +318,8 @@ func (s *mistralStream) readLine() ([]byte, error) {
 			return nil, err
 		}
 		
-		// Append to the buffer
+		// Append to buffer
 		s.buffer = append(s.buffer, buf[:n]...)
-		
-		// If the buffer is too large, return an error
-		if len(s.buffer) > 1024*1024 {
-			return nil, errors.New("buffer overflow")
-		}
 	}
 }
 
@@ -354,6 +336,8 @@ type chatCompletionRequest struct {
 	Temperature      float64       `json:"temperature,omitempty"`
 	MaxTokens        int           `json:"max_tokens,omitempty"`
 	TopP             float64       `json:"top_p,omitempty"`
+	FrequencyPenalty float64       `json:"frequency_penalty,omitempty"`
+	PresencePenalty  float64       `json:"presence_penalty,omitempty"`
 	Stop             []string      `json:"stop,omitempty"`
 }
 
@@ -390,6 +374,6 @@ type chatCompletionStreamResponse struct {
 			Role    string `json:"role,omitempty"`
 			Content string `json:"content,omitempty"`
 		} `json:"delta"`
-		FinishReason string `json:"finish_reason"`
+		FinishReason string `json:"finish_reason,omitempty"`
 	} `json:"choices"`
 }
