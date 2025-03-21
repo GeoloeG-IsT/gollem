@@ -35,16 +35,28 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/user/gollem/pkg/config"
 	"github.com/user/gollem/pkg/core"
-	"github.com/user/gollem/pkg/providers/openai"
 )
 
 func main() {
+	// Load configuration
+	manager, err := config.NewConfigManager("config.json")
+	if err != nil {
+		log.Fatalf("Failed to load config: %v", err)
+	}
+
+	// Get the default provider
+	name, providerConfig, err := manager.GetDefaultProvider()
+	if err != nil {
+		log.Fatalf("Failed to get default provider: %v", err)
+	}
+
+	// Create a registry
+	registry := core.NewRegistry()
+
 	// Create a provider
-	provider, err := openai.NewProvider(openai.Config{
-		APIKey: "your-api-key", // Replace with your actual API key
-		Model:  "gpt-4",
-	})
+	provider, err := registry.CreateProvider(providerConfig.Type, providerConfig)
 	if err != nil {
 		log.Fatalf("Failed to create provider: %v", err)
 	}
@@ -114,27 +126,15 @@ Environment variables can be used to override configuration values:
 - `GOLLEM_RAG_ENABLED`: Enable or disable RAG
 - `GOLLEM_TRACING_ENABLED`: Enable or disable tracing
 
-## Examples
-
-The repository includes several examples demonstrating different features:
-
-- [Simple Example](examples/simple/main.go): Basic usage of the package
-- [Caching Example](examples/caching/main.go): Using the caching middleware
-- [RAG Example](examples/rag/main.go): Building a RAG application
-- [Tracing Example](examples/tracing/main.go): Using the tracing functionality
-
 ## Documentation
 
 For more detailed documentation, see the following:
 
-- [API Documentation](docs/api.md)
-- [Provider Documentation](docs/providers.md)
-- [RAG Documentation](docs/rag.md)
-- [Tracing Documentation](docs/tracing.md)
-
-## Contributing
-
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+- [API Documentation](./docs/api.md)
+- [Provider Documentation](./docs/providers.md)
+- [RAG Documentation](./docs/rag.md)
+- [Tracing Documentation](./docs/tracing.md)
+- [Examples](./examples)
 
 ## License
 
