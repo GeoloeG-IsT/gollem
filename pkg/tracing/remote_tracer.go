@@ -22,7 +22,10 @@ type RemoteTracer struct {
 }
 
 // NewRemoteTracer creates a new remote tracer
-func NewRemoteTracer(endpoint, apiKey string, bufSize int) *RemoteTracer {
+func NewRemoteTracer(endpoint, apiKey string, bufSize int) (*RemoteTracer, error) {
+	if endpoint == "" {
+		return nil, fmt.Errorf("endpoint is required")
+	}
 	if bufSize <= 0 {
 		bufSize = 100
 	}
@@ -33,7 +36,7 @@ func NewRemoteTracer(endpoint, apiKey string, bufSize int) *RemoteTracer {
 		buffer:   make([]*Span, 0, bufSize),
 		bufSize:  bufSize,
 		client:   &http.Client{Timeout: 10 * time.Second},
-	}
+	}, nil
 }
 
 // StartSpan starts a new span
@@ -69,7 +72,7 @@ func (t *RemoteTracer) StartSpan(ctx context.Context, name string, opts ...SpanO
 }
 
 // EndSpan ends a span
-func (t *RemoteTracer) EndSpan(ctx context.Context, status SpanStatus, err error) {
+func (t *RemoteTracer) EndSpan(ctx context.Context, status SpanStatus) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -82,11 +85,6 @@ func (t *RemoteTracer) EndSpan(ctx context.Context, status SpanStatus, err error
 	// Set the end time and status
 	span.EndTime = time.Now()
 	span.Status = status
-
-	// Add error information
-	if err != nil {
-		span.Attributes["error"] = err.Error()
-	}
 
 	// Add the span to the buffer
 	t.buffer = append(t.buffer, span)
@@ -135,8 +133,8 @@ func (t *RemoteTracer) SetAttribute(ctx context.Context, key string, value inter
 }
 
 // Flush flushes any pending spans
-func (t *RemoteTracer) Flush(ctx context.Context) error {
-	return t.flushInternal(ctx)
+func (t *RemoteTracer) Flush() error {
+	return t.flushInternal(context.Background())
 }
 
 // flushInternal flushes the buffer to the remote endpoint
@@ -194,13 +192,13 @@ func (t *RemoteTracer) flushInternal(ctx context.Context) error {
 
 // PhoenixTracer is a tracer compatible with Arize Phoenix
 type PhoenixTracer struct {
-	endpoint string
-	apiKey   string
+	endpoint  string
+	apiKey    string
 	projectID string
-	buffer   []*PhoenixSpan
-	bufSize  int
-	client   *http.Client
-	mu       sync.Mutex
+	buffer    []*PhoenixSpan
+	bufSize   int
+	client    *http.Client
+	mu        sync.Mutex
 }
 
 // PhoenixSpan represents a span in the Phoenix format
@@ -273,7 +271,7 @@ func (t *PhoenixTracer) StartSpan(ctx context.Context, name string, opts ...Span
 }
 
 // EndSpan ends a span
-func (t *PhoenixTracer) EndSpan(ctx context.Context, status SpanStatus, err error) {
+func (t *PhoenixTracer) EndSpan(ctx context.Context, status SpanStatus) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -286,11 +284,6 @@ func (t *PhoenixTracer) EndSpan(ctx context.Context, status SpanStatus, err erro
 	// Set the end time and status
 	span.EndTime = time.Now()
 	span.Status = status
-
-	// Add error information
-	if err != nil {
-		span.Attributes["error"] = err.Error()
-	}
 
 	// Convert to Phoenix format
 	phoenixSpan := &PhoenixSpan{
@@ -364,8 +357,8 @@ func (t *PhoenixTracer) SetAttribute(ctx context.Context, key string, value inte
 }
 
 // Flush flushes any pending spans
-func (t *PhoenixTracer) Flush(ctx context.Context) error {
-	return t.flushInternal(ctx)
+func (t *PhoenixTracer) Flush() error {
+	return t.flushInternal(context.Background())
 }
 
 // flushInternal flushes the buffer to the remote endpoint

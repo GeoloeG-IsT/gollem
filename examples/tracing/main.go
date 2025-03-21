@@ -46,7 +46,7 @@ func main() {
 	defer fileTracer.Close()
 
 	// Wrap the provider with console tracing
-	tracedProvider := tracing.NewLLMTracer(provider, consoleTracer)
+	tracedProvider := tracing.NewLLMTracer("example_traced", provider, consoleTracer)
 
 	// Create a prompt
 	prompt := core.NewPrompt("What is the capital of France?")

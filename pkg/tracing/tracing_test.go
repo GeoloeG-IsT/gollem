@@ -2,10 +2,11 @@ package tracing_test
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
-	"time"
 
 	"github.com/GeoloeG-IsT/gollem/pkg/core"
 	"github.com/GeoloeG-IsT/gollem/pkg/tracing"
@@ -34,15 +35,15 @@ func TestConsoleTracer(t *testing.T) {
 	tracer.SetAttribute(ctx, "test_attribute", "test_value")
 
 	// End the span
-	tracer.EndSpan(ctx, tracing.SpanStatusOK, nil)
+	tracer.EndSpan(ctx, tracing.SpanStatusOK)
 
 	// Test error case
 	ctx, span = tracer.StartSpan(ctx, "error_span")
-	tracer.EndSpan(ctx, tracing.SpanStatusError, fmt.Errorf("test error"))
+	tracer.EndSpan(ctx, tracing.SpanStatusError)
 
 	// Test nested spans
 	ctx, parentSpan := tracer.StartSpan(ctx, "parent_span")
-	ctx, childSpan := tracer.StartSpan(ctx, "child_span")
+	ctx, childSpan := tracer.StartSpan(ctx, "child_span", tracing.WithParent(parentSpan))
 
 	// Check the child span
 	if childSpan.ParentID != parentSpan.ID {
@@ -53,11 +54,11 @@ func TestConsoleTracer(t *testing.T) {
 	}
 
 	// End the spans
-	tracer.EndSpan(ctx, tracing.SpanStatusOK, nil)
-	tracer.EndSpan(context.WithValue(context.Background(), struct{}{}, parentSpan), tracing.SpanStatusOK, nil)
+	tracer.EndSpan(ctx, tracing.SpanStatusOK)
+	tracer.EndSpan(context.WithValue(context.Background(), struct{}{}, parentSpan), tracing.SpanStatusOK)
 
 	// Flush the tracer
-	err := tracer.Flush(ctx)
+	err := tracer.Flush()
 	if err != nil {
 		t.Fatalf("Failed to flush tracer: %v", err)
 	}
@@ -93,10 +94,10 @@ func TestFileTracer(t *testing.T) {
 	tracer.SetAttribute(ctx, "test_attribute", "test_value")
 
 	// End the span
-	tracer.EndSpan(ctx, tracing.SpanStatusOK, nil)
+	tracer.EndSpan(ctx, tracing.SpanStatusOK)
 
 	// Flush the tracer
-	err = tracer.Flush(ctx)
+	err = tracer.Flush()
 	if err != nil {
 		t.Fatalf("Failed to flush tracer: %v", err)
 	}
@@ -148,7 +149,7 @@ func TestLLMTracer(t *testing.T) {
 	tracer := tracing.NewConsoleTracer()
 
 	// Create an LLM tracer
-	llmTracer := tracing.NewLLMTracer(provider, tracer)
+	llmTracer := tracing.NewLLMTracer("mock_provider_traced", provider, tracer)
 
 	// Check the name
 	if llmTracer.Name() != "mock_provider_traced" {

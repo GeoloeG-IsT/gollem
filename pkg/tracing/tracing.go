@@ -10,6 +10,64 @@ import (
 	"time"
 )
 
+// TracerFactory manages multiple tracers
+type TracerFactory struct {
+	tracers map[string]Tracer
+	mu      sync.Mutex
+}
+
+// NewTracerFactory creates a new tracer factory
+func NewTracerFactory() *TracerFactory {
+	return &TracerFactory{
+		tracers: make(map[string]Tracer),
+	}
+}
+
+// CreateTracer creates a new tracer based on configuration
+func (f *TracerFactory) CreateTracer(config map[string]interface{}) (Tracer, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	tracerType, ok := config["type"].(string)
+	if !ok {
+		return nil, fmt.Errorf("missing tracer type in configuration")
+	}
+
+	switch tracerType {
+	case "console":
+		return NewConsoleTracer(), nil
+	case "file":
+		path, ok := config["path"].(string)
+		if !ok {
+			return nil, fmt.Errorf("missing path for file tracer")
+		}
+		return NewFileTracer(path)
+	case "remote":
+		endpoint, ok := config["endpoint"].(string)
+		if !ok {
+			return nil, fmt.Errorf("missing endpoint for remote tracer")
+		}
+		apiKey, _ := config["api_key"].(string) // Optional
+		timeout, _ := config["timeout"].(int)   // Optional, default to 0
+		return NewRemoteTracer(endpoint, apiKey, timeout)
+	case "phoenix":
+		endpoint, ok := config["endpoint"].(string)
+		if !ok {
+			return nil, fmt.Errorf("missing endpoint for phoenix tracer")
+		}
+		projectID, ok := config["project_id"].(string)
+		if !ok {
+			return nil, fmt.Errorf("missing project ID for phoenix tracer")
+		}
+		apiKey, _ := config["api_key"].(string) // Optional
+		bufSize, _ := config["buf_size"].(int)  // Optional, default to 100
+		tracer := NewPhoenixTracer(endpoint, apiKey, projectID, bufSize)
+		return tracer, nil
+	default:
+		return nil, fmt.Errorf("unknown tracer type: %s", tracerType)
+	}
+}
+
 // Span represents a trace span
 type Span struct {
 	// ID is a unique identifier for the span
