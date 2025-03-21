@@ -1,5 +1,5 @@
 {
-  "default_provider": "mistral",
+  "default_provider": "anthropic",
   "providers": {
     "openai": {
       "type": "openai",
@@ -10,6 +10,23 @@
       "type": "mistral",
       "api_key": "",
       "model": "mistral-medium"
+    },
+    "anthropic": {
+      "type": "anthropic",
+      "api_key": "",
+      "model": "claude-3-7-sonnet-latest",
+      "version": "2023-06-01"
+    },
+    "google": {
+      "type": "google",
+      "api_key": "",
+      "model": "gemini-pro"
+    },
+    "llama": {
+      "type": "llama",
+      "api_key": "",
+      "model": "llama-3-70b",
+      "endpoint": "http://localhost:8080"
     }
   },
   "cache": {

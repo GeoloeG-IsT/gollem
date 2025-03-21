@@ -13,7 +13,7 @@ import (
 	"github.com/GeoloeG-IsT/gollem/pkg/core"
 )
 
-// Provider implements the core.LLMProvider interface for Llama models
+// Provider implements the core.LLMProvider interface for Llama
 type Provider struct {
 	config Config
 	client *http.Client
@@ -21,14 +21,14 @@ type Provider struct {
 
 // Config contains the configuration for the Llama provider
 type Config struct {
-	// Endpoint is the API endpoint for the Llama model server
-	Endpoint string `json:"endpoint"`
+	// APIKey is the API key (optional for some Llama servers)
+	APIKey string `json:"api_key,omitempty"`
 	
 	// Model is the model to use
-	Model string `json:"model,omitempty"`
+	Model string `json:"model"`
 	
-	// APIKey is the API key (if required by the server)
-	APIKey string `json:"api_key,omitempty"`
+	// Endpoint is the API endpoint
+	Endpoint string `json:"endpoint"`
 	
 	// Timeout is the request timeout in seconds
 	Timeout int `json:"timeout,omitempty"`
@@ -40,8 +40,12 @@ func NewProvider(config Config) (*Provider, error) {
 		return nil, errors.New("endpoint is required")
 	}
 	
+	if config.Model == "" {
+		return nil, errors.New("model is required")
+	}
+	
 	if config.Timeout == 0 {
-		config.Timeout = 60 // Longer timeout for local models
+		config.Timeout = 30
 	}
 	
 	client := &http.Client{
@@ -71,7 +75,7 @@ func (p *Provider) Generate(ctx context.Context, prompt *core.Prompt) (*core.Res
 	req, err := http.NewRequestWithContext(
 		ctx,
 		"POST",
-		fmt.Sprintf("%s/v1/completions", p.config.Endpoint),
+		fmt.Sprintf("%s/completion", p.config.Endpoint),
 		bytes.NewBuffer(reqBody),
 	)
 	if err != nil {
@@ -105,26 +109,21 @@ func (p *Provider) Generate(ctx context.Context, prompt *core.Prompt) (*core.Res
 	
 	// Convert to core.Response
 	response := &core.Response{
-		Text: llamaResp.Choices[0].Text,
+		Text: llamaResp.Content,
 		TokensUsed: &core.TokenUsage{
-			Prompt:     llamaResp.Usage.PromptTokens,
-			Completion: llamaResp.Usage.CompletionTokens,
-			Total:      llamaResp.Usage.TotalTokens,
+			Prompt:     llamaResp.PromptTokens,
+			Completion: llamaResp.CompletionTokens,
+			Total:      llamaResp.TotalTokens,
 		},
-		FinishReason: llamaResp.Choices[0].FinishReason,
+		FinishReason: llamaResp.StopReason,
 		ModelInfo: &core.ModelInfo{
-			Name:      p.config.Model,
-			Provider:  "llama",
-			Timestamp: time.Now().Format(time.RFC3339),
+			Name:     p.config.Model,
+			Provider: "llama",
+			Version:  "1.0.0",
 		},
 		ProviderInfo: &core.ProviderInfo{
 			Name:    "llama",
 			Version: "1.0.0",
-		},
-		Metadata: map[string]interface{}{
-			"id":      llamaResp.ID,
-			"created": llamaResp.Created,
-			"model":   llamaResp.Model,
 		},
 	}
 	
@@ -161,7 +160,7 @@ func (p *Provider) GenerateStream(ctx context.Context, prompt *core.Prompt) (cor
 	req, err := http.NewRequestWithContext(
 		ctx,
 		"POST",
-		fmt.Sprintf("%s/v1/completions", p.config.Endpoint),
+		fmt.Sprintf("%s/completion", p.config.Endpoint),
 		bytes.NewBuffer(reqBody),
 	)
 	if err != nil {
@@ -197,34 +196,30 @@ func (p *Provider) GenerateStream(ctx context.Context, prompt *core.Prompt) (cor
 func (p *Provider) prepareRequestBody(prompt *core.Prompt) ([]byte, error) {
 	// Create the request body
 	reqBody := completionRequest{
-		Model:            p.config.Model,
-		Prompt:           formatPrompt(prompt),
-		Temperature:      prompt.Temperature,
-		MaxTokens:        prompt.MaxTokens,
-		TopP:             prompt.TopP,
-		FrequencyPenalty: prompt.FrequencyPenalty,
-		PresencePenalty:  prompt.PresencePenalty,
-		Stop:             prompt.StopSequences,
+		Model:       p.config.Model,
+		Prompt:      prompt.Text,
+		MaxTokens:   prompt.MaxTokens,
+		Temperature: prompt.Temperature,
+		TopP:        prompt.TopP,
+		Stop:        prompt.StopSequences,
 	}
 	
-	// Add additional parameters
-	for k, v := range prompt.AdditionalParams {
-		// In a real implementation, this would add the parameters to the request
+	// Add system message if provided
+	if prompt.SystemMessage != "" {
+		reqBody.SystemPrompt = prompt.SystemMessage
+	}
+	
+	// Add schema if provided
+	if prompt.Schema != nil {
+		// In a real implementation, this would set the response_format to JSON
+		// and include the schema
 		// For simplicity, we're not implementing this
 	}
 	
-	return json.Marshal(reqBody)
-}
-
-// formatPrompt formats the prompt for the Llama API
-func formatPrompt(prompt *core.Prompt) string {
-	// If there's a system message, include it
-	if prompt.SystemMessage != "" {
-		return fmt.Sprintf("<s>[INST] <<SYS>>\n%s\n<</SYS>>\n\n%s [/INST]", 
-			prompt.SystemMessage, prompt.Text)
-	}
+	// Add additional parameters
+	// For simplicity, we're not implementing this
 	
-	return fmt.Sprintf("<s>[INST] %s [/INST]", prompt.Text)
+	return json.Marshal(reqBody)
 }
 
 // llamaStream implements core.ResponseStream for Llama
@@ -267,19 +262,14 @@ func (s *llamaStream) Next() (*core.ResponseChunk, error) {
 	
 	// Create a response chunk
 	chunk := &core.ResponseChunk{
-		Text:    streamResp.Choices[0].Text,
+		Text:    streamResp.Content,
 		IsFinal: false,
-		Metadata: map[string]interface{}{
-			"id":      streamResp.ID,
-			"created": streamResp.Created,
-			"model":   streamResp.Model,
-		},
 	}
 	
 	// Check if this is the final chunk
-	if streamResp.Choices[0].FinishReason != "" {
+	if streamResp.StopReason != "" {
 		chunk.IsFinal = true
-		chunk.FinishReason = streamResp.Choices[0].FinishReason
+		chunk.FinishReason = streamResp.StopReason
 	}
 	
 	return chunk, nil
@@ -293,12 +283,12 @@ func (s *llamaStream) Close() error {
 // readLine reads a line from the stream
 func (s *llamaStream) readLine() ([]byte, error) {
 	var line []byte
-	var isPrefix bool
 	
 	for {
 		// If we have data in the buffer, try to find a newline
 		if len(s.buffer) > 0 {
-			if i := bytes.IndexByte(s.buffer, '\n'); i >= 0 {
+			i := bytes.IndexByte(s.buffer, '\n')
+			if i >= 0 {
 				line = s.buffer[:i]
 				s.buffer = s.buffer[i+1:]
 				return line, nil
@@ -318,55 +308,35 @@ func (s *llamaStream) readLine() ([]byte, error) {
 			return nil, err
 		}
 		
-		// Append to the buffer
+		// Append to buffer
 		s.buffer = append(s.buffer, buf[:n]...)
-		
-		// If the buffer is too large, return an error
-		if len(s.buffer) > 1024*1024 {
-			return nil, errors.New("buffer overflow")
-		}
 	}
 }
 
-// completionRequest represents a request to the completions API
+// completionRequest represents a request to the completion API
 type completionRequest struct {
-	Model            string   `json:"model,omitempty"`
-	Prompt           string   `json:"prompt"`
-	Temperature      float64  `json:"temperature,omitempty"`
-	MaxTokens        int      `json:"max_tokens,omitempty"`
-	TopP             float64  `json:"top_p,omitempty"`
-	FrequencyPenalty float64  `json:"frequency_penalty,omitempty"`
-	PresencePenalty  float64  `json:"presence_penalty,omitempty"`
-	Stop             []string `json:"stop,omitempty"`
+	Model        string    `json:"model"`
+	Prompt       string    `json:"prompt"`
+	SystemPrompt string    `json:"system_prompt,omitempty"`
+	MaxTokens    int       `json:"max_tokens,omitempty"`
+	Temperature  float64   `json:"temperature,omitempty"`
+	TopP         float64   `json:"top_p,omitempty"`
+	Stop         []string  `json:"stop,omitempty"`
 }
 
-// completionResponse represents a response from the completions API
+// completionResponse represents a response from the completion API
 type completionResponse struct {
-	ID      string `json:"id"`
-	Object  string `json:"object"`
-	Created int64  `json:"created"`
-	Model   string `json:"model"`
-	Choices []struct {
-		Text         string `json:"text"`
-		Index        int    `json:"index"`
-		FinishReason string `json:"finish_reason"`
-	} `json:"choices"`
-	Usage struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		TotalTokens      int `json:"total_tokens"`
-	} `json:"usage"`
+	Model            string `json:"model"`
+	Content          string `json:"content"`
+	StopReason       string `json:"stop_reason"`
+	PromptTokens     int    `json:"prompt_tokens"`
+	CompletionTokens int    `json:"completion_tokens"`
+	TotalTokens      int    `json:"total_tokens"`
 }
 
-// completionStreamResponse represents a streaming response from the completions API
+// completionStreamResponse represents a streaming response from the completion API
 type completionStreamResponse struct {
-	ID      string `json:"id"`
-	Object  string `json:"object"`
-	Created int64  `json:"created"`
-	Model   string `json:"model"`
-	Choices []struct {
-		Text         string `json:"text"`
-		Index        int    `json:"index"`
-		FinishReason string `json:"finish_reason"`
-	} `json:"choices"`
+	Model      string `json:"model"`
+	Content    string `json:"content"`
+	StopReason string `json:"stop_reason,omitempty"`
 }

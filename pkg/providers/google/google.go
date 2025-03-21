@@ -13,7 +13,7 @@ import (
 	"github.com/GeoloeG-IsT/gollem/pkg/core"
 )
 
-// Provider implements the core.LLMProvider interface for Google's Gemini models
+// Provider implements the core.LLMProvider interface for Google AI
 type Provider struct {
 	config Config
 	client *http.Client
@@ -33,8 +33,11 @@ type Config struct {
 	// Timeout is the request timeout in seconds
 	Timeout int `json:"timeout,omitempty"`
 	
-	// ProjectID is the Google Cloud project ID (optional)
-	ProjectID string `json:"project_id,omitempty"`
+	// Project is the Google Cloud project ID (optional)
+	Project string `json:"project,omitempty"`
+	
+	// Location is the Google Cloud location (optional)
+	Location string `json:"location,omitempty"`
 }
 
 // NewProvider creates a new Google provider
@@ -79,10 +82,7 @@ func (p *Provider) Generate(ctx context.Context, prompt *core.Prompt) (*core.Res
 	}
 	
 	// Create the request URL
-	url := fmt.Sprintf("%s/models/%s:generateContent?key=%s", 
-		p.config.Endpoint, 
-		p.config.Model, 
-		p.config.APIKey)
+	url := fmt.Sprintf("%s/models/%s:generateContent?key=%s", p.config.Endpoint, p.config.Model, p.config.APIKey)
 	
 	// Create the request
 	req, err := http.NewRequestWithContext(
@@ -117,17 +117,9 @@ func (p *Provider) Generate(ctx context.Context, prompt *core.Prompt) (*core.Res
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 	
-	// Extract the text from the response
-	text := ""
-	if len(googleResp.Candidates) > 0 && len(googleResp.Candidates[0].Content.Parts) > 0 {
-		if textValue, ok := googleResp.Candidates[0].Content.Parts[0]["text"]; ok {
-			text = textValue.(string)
-		}
-	}
-	
 	// Convert to core.Response
 	response := &core.Response{
-		Text: text,
+		Text: googleResp.Candidates[0].Content.Parts[0].Text,
 		TokensUsed: &core.TokenUsage{
 			Prompt:     googleResp.UsageMetadata.PromptTokenCount,
 			Completion: googleResp.UsageMetadata.CandidatesTokenCount,
@@ -135,16 +127,13 @@ func (p *Provider) Generate(ctx context.Context, prompt *core.Prompt) (*core.Res
 		},
 		FinishReason: googleResp.Candidates[0].FinishReason,
 		ModelInfo: &core.ModelInfo{
-			Name:      p.config.Model,
-			Provider:  "google",
-			Timestamp: time.Now().Format(time.RFC3339),
+			Name:     p.config.Model,
+			Provider: "google",
+			Version:  "1.0.0",
 		},
 		ProviderInfo: &core.ProviderInfo{
 			Name:    "google",
 			Version: "1.0.0",
-		},
-		Metadata: map[string]interface{}{
-			"model": googleResp.Candidates[0].ModelInfo.ModelName,
 		},
 	}
 	
@@ -178,10 +167,7 @@ func (p *Provider) GenerateStream(ctx context.Context, prompt *core.Prompt) (cor
 	}
 	
 	// Create the request URL
-	url := fmt.Sprintf("%s/models/%s:streamGenerateContent?key=%s", 
-		p.config.Endpoint, 
-		p.config.Model, 
-		p.config.APIKey)
+	url := fmt.Sprintf("%s/models/%s:streamGenerateContent?key=%s", p.config.Endpoint, p.config.Model, p.config.APIKey)
 	
 	// Create the request
 	req, err := http.NewRequestWithContext(
@@ -219,53 +205,45 @@ func (p *Provider) GenerateStream(ctx context.Context, prompt *core.Prompt) (cor
 // prepareRequestBody prepares the request body for the Google API
 func (p *Provider) prepareRequestBody(prompt *core.Prompt) ([]byte, error) {
 	// Create the content
-	content := map[string]interface{}{
-		"role": "user",
-		"parts": []map[string]interface{}{
+	contentObj := contentType{
+		Parts: []part{
 			{
-				"text": prompt.Text,
+				Text: prompt.Text,
 			},
 		},
 	}
 	
 	// Create the request body
-	reqBody := map[string]interface{}{
-		"contents": []map[string]interface{}{content},
-		"generationConfig": map[string]interface{}{
-			"temperature":      prompt.Temperature,
-			"maxOutputTokens": prompt.MaxTokens,
-			"topP":             prompt.TopP,
+	reqBody := generateContentRequest{
+		Contents: []contentType{contentObj},
+		GenerationConfig: generationConfig{
+			Temperature:     prompt.Temperature,
+			MaxOutputTokens: prompt.MaxTokens,
+			TopP:            prompt.TopP,
+			StopSequences:   prompt.StopSequences,
 		},
 	}
 	
 	// Add system message if provided
 	if prompt.SystemMessage != "" {
-		reqBody["systemInstruction"] = map[string]interface{}{
-			"parts": []map[string]interface{}{
+		reqBody.SystemInstruction = &contentType{
+			Parts: []part{
 				{
-					"text": prompt.SystemMessage,
+					Text: prompt.SystemMessage,
 				},
 			},
 		}
 	}
 	
-	// Add stop sequences if provided
-	if len(prompt.StopSequences) > 0 {
-		reqBody["generationConfig"].(map[string]interface{})["stopSequences"] = prompt.StopSequences
-	}
-	
 	// Add schema if provided
 	if prompt.Schema != nil {
-		// In a real implementation, this would set the response format to JSON
+		// In a real implementation, this would set the response_format to JSON
 		// and include the schema
 		// For simplicity, we're not implementing this
 	}
 	
 	// Add additional parameters
-	for k, v := range prompt.AdditionalParams {
-		// In a real implementation, this would add the parameters to the request
-		// For simplicity, we're not implementing this
-	}
+	// For simplicity, we're not implementing this
 	
 	return json.Marshal(reqBody)
 }
@@ -293,26 +271,15 @@ func (s *googleStream) Next() (*core.ResponseChunk, error) {
 	}
 	
 	// Parse the JSON
-	var streamResp generateContentStreamResponse
+	var streamResp generateContentResponse
 	if err := json.Unmarshal(line, &streamResp); err != nil {
 		return nil, fmt.Errorf("failed to parse stream response: %w", err)
 	}
 	
-	// Extract the text from the response
-	text := ""
-	if len(streamResp.Candidates) > 0 && len(streamResp.Candidates[0].Content.Parts) > 0 {
-		if textValue, ok := streamResp.Candidates[0].Content.Parts[0]["text"]; ok {
-			text = textValue.(string)
-		}
-	}
-	
 	// Create a response chunk
 	chunk := &core.ResponseChunk{
-		Text:    text,
+		Text:    streamResp.Candidates[0].Content.Parts[0].Text,
 		IsFinal: false,
-		Metadata: map[string]interface{}{
-			"model": streamResp.Candidates[0].ModelInfo.ModelName,
-		},
 	}
 	
 	// Check if this is the final chunk
@@ -332,12 +299,12 @@ func (s *googleStream) Close() error {
 // readLine reads a line from the stream
 func (s *googleStream) readLine() ([]byte, error) {
 	var line []byte
-	var isPrefix bool
 	
 	for {
 		// If we have data in the buffer, try to find a newline
 		if len(s.buffer) > 0 {
-			if i := bytes.IndexByte(s.buffer, '\n'); i >= 0 {
+			i := bytes.IndexByte(s.buffer, '\n')
+			if i >= 0 {
 				line = s.buffer[:i]
 				s.buffer = s.buffer[i+1:]
 				return line, nil
@@ -357,45 +324,47 @@ func (s *googleStream) readLine() ([]byte, error) {
 			return nil, err
 		}
 		
-		// Append to the buffer
+		// Append to buffer
 		s.buffer = append(s.buffer, buf[:n]...)
-		
-		// If the buffer is too large, return an error
-		if len(s.buffer) > 1024*1024 {
-			return nil, errors.New("buffer overflow")
-		}
 	}
+}
+
+// contentType represents the content in a request or response
+type contentType struct {
+	Role  string `json:"role,omitempty"`
+	Parts []part `json:"parts"`
+}
+
+// part represents a part of content
+type part struct {
+	Text string `json:"text"`
+}
+
+// generationConfig represents the generation configuration
+type generationConfig struct {
+	Temperature     float64  `json:"temperature,omitempty"`
+	MaxOutputTokens int      `json:"maxOutputTokens,omitempty"`
+	TopP            float64  `json:"topP,omitempty"`
+	TopK            int      `json:"topK,omitempty"`
+	StopSequences   []string `json:"stopSequences,omitempty"`
+}
+
+// generateContentRequest represents a request to the generateContent API
+type generateContentRequest struct {
+	Contents          []contentType      `json:"contents"`
+	SystemInstruction *contentType       `json:"systemInstruction,omitempty"`
+	GenerationConfig  generationConfig   `json:"generationConfig,omitempty"`
 }
 
 // generateContentResponse represents a response from the generateContent API
 type generateContentResponse struct {
 	Candidates []struct {
-		Content struct {
-			Parts []map[string]interface{} `json:"parts"`
-			Role  string                   `json:"role"`
-		} `json:"content"`
-		FinishReason string `json:"finishReason"`
-		ModelInfo    struct {
-			ModelName string `json:"modelName"`
-		} `json:"modelInfo"`
+		Content      contentType `json:"content"`
+		FinishReason string      `json:"finishReason"`
 	} `json:"candidates"`
 	UsageMetadata struct {
-		PromptTokenCount     int `json:"promptTokenCount"`
-		CandidatesTokenCount int `json:"candidatesTokenCount"`
-		TotalTokenCount      int `json:"totalTokenCount"`
+		PromptTokenCount      int `json:"promptTokenCount"`
+		CandidatesTokenCount  int `json:"candidatesTokenCount"`
+		TotalTokenCount       int `json:"totalTokenCount"`
 	} `json:"usageMetadata"`
-}
-
-// generateContentStreamResponse represents a streaming response from the generateContent API
-type generateContentStreamResponse struct {
-	Candidates []struct {
-		Content struct {
-			Parts []map[string]interface{} `json:"parts"`
-			Role  string                   `json:"role"`
-		} `json:"content"`
-		FinishReason string `json:"finishReason"`
-		ModelInfo    struct {
-			ModelName string `json:"modelName"`
-		} `json:"modelInfo"`
-	} `json:"candidates"`
 }

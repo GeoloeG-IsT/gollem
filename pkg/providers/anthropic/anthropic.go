@@ -127,19 +127,13 @@ func (p *Provider) Generate(ctx context.Context, prompt *core.Prompt) (*core.Res
 		},
 		FinishReason: anthropicResp.StopReason,
 		ModelInfo: &core.ModelInfo{
-			Name:      p.config.Model,
-			Provider:  "anthropic",
-			Timestamp: time.Now().Format(time.RFC3339),
+			Name:     p.config.Model,
+			Provider: "anthropic",
+			Version:  "1.0.0",
 		},
 		ProviderInfo: &core.ProviderInfo{
 			Name:    "anthropic",
 			Version: "1.0.0",
-		},
-		Metadata: map[string]interface{}{
-			"id":      anthropicResp.ID,
-			"type":    anthropicResp.Type,
-			"role":    anthropicResp.Role,
-			"model":   anthropicResp.Model,
 		},
 	}
 	
@@ -240,10 +234,7 @@ func (p *Provider) prepareRequestBody(prompt *core.Prompt) ([]byte, error) {
 	}
 	
 	// Add additional parameters
-	for k, v := range prompt.AdditionalParams {
-		// In a real implementation, this would add the parameters to the request
-		// For simplicity, we're not implementing this
-	}
+	// For simplicity, we're not implementing this
 	
 	return json.Marshal(reqBody)
 }
@@ -290,11 +281,6 @@ func (s *anthropicStream) Next() (*core.ResponseChunk, error) {
 	chunk := &core.ResponseChunk{
 		Text:    streamResp.Delta.Text,
 		IsFinal: false,
-		Metadata: map[string]interface{}{
-			"id":    streamResp.ID,
-			"type":  streamResp.Type,
-			"model": streamResp.Model,
-		},
 	}
 	
 	// Check if this is the final chunk
@@ -314,12 +300,12 @@ func (s *anthropicStream) Close() error {
 // readLine reads a line from the stream
 func (s *anthropicStream) readLine() ([]byte, error) {
 	var line []byte
-	var isPrefix bool
 	
 	for {
 		// If we have data in the buffer, try to find a newline
 		if len(s.buffer) > 0 {
-			if i := bytes.IndexByte(s.buffer, '\n'); i >= 0 {
+			i := bytes.IndexByte(s.buffer, '\n')
+			if i >= 0 {
 				line = s.buffer[:i]
 				s.buffer = s.buffer[i+1:]
 				return line, nil
@@ -339,13 +325,8 @@ func (s *anthropicStream) readLine() ([]byte, error) {
 			return nil, err
 		}
 		
-		// Append to the buffer
+		// Append to buffer
 		s.buffer = append(s.buffer, buf[:n]...)
-		
-		// If the buffer is too large, return an error
-		if len(s.buffer) > 1024*1024 {
-			return nil, errors.New("buffer overflow")
-		}
 	}
 }
 
@@ -368,10 +349,10 @@ type messageRequest struct {
 
 // messageResponse represents a response from the messages API
 type messageResponse struct {
-	ID      string `json:"id"`
-	Type    string `json:"type"`
-	Role    string `json:"role"`
-	Content []struct {
+	ID        string `json:"id"`
+	Type      string `json:"type"`
+	Role      string `json:"role"`
+	Content   []struct {
 		Type string `json:"type"`
 		Text string `json:"text"`
 	} `json:"content"`
@@ -385,12 +366,12 @@ type messageResponse struct {
 
 // messageStreamResponse represents a streaming response from the messages API
 type messageStreamResponse struct {
-	ID         string `json:"id"`
 	Type       string `json:"type"`
+	ID         string `json:"id"`
 	Model      string `json:"model"`
 	StopReason string `json:"stop_reason,omitempty"`
 	Delta      struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
-	} `json:"delta,omitempty"`
+		Type    string `json:"type,omitempty"`
+		Text    string `json:"text,omitempty"`
+	} `json:"delta"`
 }

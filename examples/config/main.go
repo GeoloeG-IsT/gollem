@@ -9,6 +9,9 @@ import (
 	"path/filepath"
 
 	"github.com/GeoloeG-IsT/gollem/pkg/core"
+	"github.com/GeoloeG-IsT/gollem/pkg/providers/anthropic"
+	"github.com/GeoloeG-IsT/gollem/pkg/providers/google"
+	"github.com/GeoloeG-IsT/gollem/pkg/providers/llama"
 	"github.com/GeoloeG-IsT/gollem/pkg/providers/mistral"
 	"github.com/GeoloeG-IsT/gollem/pkg/providers/openai"
 	"github.com/joho/godotenv"
@@ -29,6 +32,7 @@ type ProviderConfig struct {
 	APIKey     string                 `json:"api_key"`
 	Model      string                 `json:"model"`
 	Endpoint   string                 `json:"endpoint,omitempty"`
+	Version    string                 `json:"version,omitempty"`
 	Parameters map[string]interface{} `json:"parameters,omitempty"`
 }
 
@@ -50,6 +54,24 @@ func main() {
 	if mistralAPIKey == "" {
 		log.Println("Warning: MISTRAL_API_KEY not found in environment, using dummy key")
 		mistralAPIKey = "dummy_mistral_api_key_12345"
+	}
+
+	anthropicAPIKey := os.Getenv("ANTHROPIC_API_KEY")
+	if anthropicAPIKey == "" {
+		log.Println("Warning: ANTHROPIC_API_KEY not found in environment, using dummy key")
+		anthropicAPIKey = "dummy_anthropic_api_key_12345"
+	}
+
+	googleAPIKey := os.Getenv("GOOGLE_API_KEY")
+	if googleAPIKey == "" {
+		log.Println("Warning: GOOGLE_API_KEY not found in environment, using dummy key")
+		googleAPIKey = "dummy_google_api_key_12345"
+	}
+
+	llamaAPIKey := os.Getenv("LLAMA_API_KEY")
+	if llamaAPIKey == "" {
+		log.Println("Warning: LLAMA_API_KEY not found in environment, using dummy key")
+		llamaAPIKey = "dummy_llama_api_key_12345"
 	}
 
 	// Load configuration from config.json
@@ -77,6 +99,21 @@ func main() {
 		cfg.Providers["mistral"] = provider
 	}
 
+	if provider, ok := cfg.Providers["anthropic"]; ok {
+		provider.APIKey = anthropicAPIKey
+		cfg.Providers["anthropic"] = provider
+	}
+
+	if provider, ok := cfg.Providers["google"]; ok {
+		provider.APIKey = googleAPIKey
+		cfg.Providers["google"] = provider
+	}
+
+	if provider, ok := cfg.Providers["llama"]; ok {
+		provider.APIKey = llamaAPIKey
+		cfg.Providers["llama"] = provider
+	}
+
 	// Print configuration details
 	fmt.Println("Configuration loaded successfully!")
 	fmt.Println("Default Provider:", cfg.DefaultProvider)
@@ -100,6 +137,25 @@ func main() {
 		})
 	case "mistral":
 		provider, err = mistral.NewProvider(mistral.Config{
+			APIKey:   providerConfig.APIKey,
+			Model:    providerConfig.Model,
+			Endpoint: providerConfig.Endpoint,
+		})
+	case "anthropic":
+		provider, err = anthropic.NewProvider(anthropic.Config{
+			APIKey:   providerConfig.APIKey,
+			Model:    providerConfig.Model,
+			Endpoint: providerConfig.Endpoint,
+			Version:  providerConfig.Version,
+		})
+	case "google":
+		provider, err = google.NewProvider(google.Config{
+			APIKey:   providerConfig.APIKey,
+			Model:    providerConfig.Model,
+			Endpoint: providerConfig.Endpoint,
+		})
+	case "llama":
+		provider, err = llama.NewProvider(llama.Config{
 			APIKey:   providerConfig.APIKey,
 			Model:    providerConfig.Model,
 			Endpoint: providerConfig.Endpoint,
